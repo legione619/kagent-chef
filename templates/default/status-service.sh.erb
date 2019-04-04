@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+set -e
+
+if [ $# -ne 1 ] ; then
+  echo "Usage: $0 service_name"
+  exit 2
+fi
+
+systemctl is-active "$1"

@@ -1,0 +1,7 @@
+dependencies: 
+  - recipe: kagent::install
+    global:  
+  - recipe: kagent::default
+    global:
+      - conda::default
+      - hopsworks::default
