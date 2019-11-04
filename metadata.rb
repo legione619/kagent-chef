@@ -1,10 +1,11 @@
+
 maintainer       "Jim Dowling"
 maintainer_email "jdowling@kth.se"
 name             "kagent"
 license          "GPL 2.0"
 description      "Installs/Configures the Karamel agent used by Hops"
 long_description IO.read(File.join(File.dirname(__FILE__), 'README.md'))
-version          "0.9.0"
+version          "1.0.0"
 source_url       "https://github.com/karamelchef/kagent-chef"
 
 
@@ -22,9 +23,8 @@ depends 'magic_shell'
 
 recipe "kagent::install", "Installs the Karamel agent and python dependencies"
 recipe "kagent::default", "Installs and configures the Karamel agent, including anaconda"
-recipe "kagent::hops", "Installs and configures the Karamel agent for hops"
 recipe "kagent::purge", "Deletes the Karamel agent files"
-recipe "kagent::anaconda", "Installs and configures anaconda"
+recipe "kagent::dev", "Development helper library"
 
 attribute "kagent/user",
           :description => "Username to run kagent as",
@@ -36,14 +36,6 @@ attribute "kagent/group",
 
 attribute "kagent/dir",
           :description => "Installation directory for kagent",
-          :type => 'string'
-
-attribute "kagent/dashboard/ip",
-          :description => " Ip address for Dashboard REST API",
-          :type => 'string'
-
-attribute "kagent/dashboard/port",
-          :description => " Port for Dashboard REST API",
           :type => 'string'
 
 attribute "kagent/enabled",
@@ -78,28 +70,12 @@ attribute "kagent/dashboard/user",
           :description => "kagent username to register with server",
           :type => "string"
 
-attribute "kagent/hostname",
-          :description => "hostname used to register with hopsworks",
-          :type => "string"
-
 attribute "kagent/dashboard/password",
           :description => "kagent password to register with server",
           :type => "string"
 
-attribute "ndb/mysql_port",
-          :description => "Port for the mysql server",
-          :type => "string"
-
-attribute "ndb/mysql_socket",
-          :description => "Socket for the mysql server",
-          :type => "string"
-
 attribute "systemd",
           :description => "Use systemd startup scripts, default 'true'",
-          :type => "string"
-
-attribute "kagent/network/interface",
-          :description => "Define the network intefaces (eth0, enp0s3)",
           :type => "string"
 
 attribute "kagent/conda_gc_interval",
@@ -122,29 +98,6 @@ attribute "hops/group",
           :description => "Haodop group for conda",
           :type => "string"
 
-attribute "smtp/host",
-          :description => "Ip Address/hostname of SMTP server (default is smtp.gmail.com)",
-          :type => 'string'
-
-attribute "smtp/port",
-          :description => "Port of SMTP server (default is 587)",
-          :type => 'string'
-
-attribute "smtp/ssl_port",
-          :description => "SSL port of SMTP server (default is 465)",
-          :type => 'string'
-
-attribute "smtp/email",
-          :description => "Email account to send notifications from. ",
-          :required => "required",
-          :type => 'string'
-
-attribute "smtp/email_password",
-          :description => "Password for email account. ",
-          :required => "required",
-          :type => 'string'
-
-
 attribute "certs/dir",
           :description => "Installation directory for ssl/tls certs",
           :type => 'string'
@@ -160,6 +113,3 @@ attribute "jupyter/python",
 attribute "kagent/python_conda_versions",
           :description => "CSV of python versions to be used as base environments for Anaconda",
           :type => "string"
-
-
-

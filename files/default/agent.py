@@ -8,7 +8,6 @@ Install:
  Netifaces:   easy_install netifaces
  IPy:         easy_install ipy
  pyOpenSSL:   apt-get install python-openssl
- MySQLdb:     apt-get install python-mysqldb
 '''
 
 import time
@@ -27,11 +26,11 @@ import sys
 import ConfigParser
 import requests
 import logging.handlers
+import coloredlogs
 import json
 from OpenSSL import crypto
 import socket
 from os.path import exists, join
-import MySQLdb
 from bottle import Bottle, run, get, post, request, HTTPResponse, server_names, ServerAdapter, response
 from cheroot import wsgi
 from cheroot.ssl.builtin import BuiltinSSLAdapter
@@ -42,6 +41,7 @@ from collections import defaultdict
 import io
 import tempfile
 import argparse
+from hops import devices
 
 import kagent_utils
 from kagent_utils import KConfig
@@ -63,60 +63,58 @@ conda_ongoing = defaultdict(lambda: False)
 
 cores = multiprocessing.cpu_count()
 
-def count_num_gpus():
-    try:
-        p = Popen(['which nvidia-smi'], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        (output,err)=p.communicate()
-        returncode = p.wait()
-        if not returncode == 0:
-            return 0
-        process = subprocess.Popen("nvidia-smi -L", shell=True, stdout=subprocess.PIPE)
-        stdout_list = process.communicate()[0].split('\n')
-        return len(stdout_list)-1
-    except Exception as err:
-        return 0
-
+def create_log_dir_if_not(kconfig):
+    log_dir = kconfig.agent_log_dir
+    if not os.path.isdir(log_dir):
+        os.makedirs(log_dir)
+        
 # logging
 def setupLogging(kconfig):
-    agent_log_file = kconfig.agent_log_file
+    agent_log_file = os.path.join(kconfig.agent_log_dir, AGENT_LOG_FILENAME)
     try:
-        os.remove(kconfig.agent_log_file + '.1')
+        os.remove(agent_log_file + '.1')
     except:
         pass
-    with open(kconfig.agent_log_file, 'w'):  # clear log file
+    with open(agent_log_file, 'w'):  # clear log file
         pass
     
     global logger
     logger = logging.getLogger('agent')
-    logger_formatter = logging.Formatter('%(asctime)s %(levelname)s [%(module)s/%(funcName)s] %(message)s')
+    log_format = "%(asctime)s %(levelname)s [%(module)s/%(funcName)s] %(message)s"
+    logger_formatter = logging.Formatter(log_format)
+
+    coloredlogs.install(level=kconfig.logging_level, fmt=log_format)
+    
     logger_file_handler = logging.handlers.RotatingFileHandler(agent_log_file, "w", maxBytes=kconfig.max_log_size, backupCount=1)
-    logger_stream_handler = logging.StreamHandler()
     logger_file_handler.setFormatter(logger_formatter)
-    logger_stream_handler.setFormatter(logger_formatter)
     logger.addHandler(logger_file_handler)
-    logger.addHandler(logger_stream_handler)
     logger.setLevel(kconfig.logging_level)
 
     # Setup kagent_utils logger
     kagent_utils_logger = logging.getLogger('kagent_utils')
     kagent_utils_logger.setLevel(kconfig.logging_level)
     kagent_utils_logger.addHandler(logger_file_handler)
-    kagent_utils_logger.addHandler(logger_stream_handler)
-
+    
     # Setup csr logger
     csr_logger = logging.getLogger('csr')
     csr_logger.setLevel(kconfig.logging_level)
     csr_logger.addHandler(logger_file_handler)
-    csr_logger.addHandler(logger_stream_handler)
-
+    
     logger.info("Hops-Kagent started.")
     logger.info("Heartbeat URL: {0}".format(kconfig.heartbeat_url))
-    logger.info("Alert URL: {0}".format(kconfig.alert_url))
     logger.info("Host Id: {0}".format(kconfig.host_id))
     logger.info("Hostname: {0}".format(kconfig.hostname))
     logger.info("Public IP: {0}".format(kconfig.public_ip))
     logger.info("Private IP: {0}".format(kconfig.private_ip))
 
+def prepare_conda_commands_logger(kconfig):
+    logger = logging.getLogger(CONDA_COMMANDS_LOGGER_NAME)
+    logger.setLevel(logging.INFO)
+    file_handler = logging.handlers.RotatingFileHandler(os.path.join(kconfig.agent_log_dir, "conda_commands.log"))
+    file_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
     
 ## Antonis: This should go away in the future!!! Used only by RESTCommandHandler execute
 # reading services
@@ -149,6 +147,7 @@ class Heartbeat():
         self._conda_report_interval = conda_report_interval
         self._last_conda_report = long(time.mktime(datetime.now().timetuple()) * 1000)
         self._host_services = host_services
+        self._recover = True
             
         while True:
             self.send()
@@ -194,11 +193,8 @@ class Heartbeat():
         services = []
         for name, service in self._host_services.iteritems():
             srv_status = {}
-            srv_status['cluster'] = service.cluster
             srv_status['group'] = service.group
             srv_status['service'] = service.name
-            # Antonis: Do we even need this?
-            srv_status['web-port'] = 0
             srv_status['status'] = service.get_state()
             services.append(srv_status)
         return services
@@ -221,15 +217,11 @@ class Heartbeat():
                 now = long(time.mktime(datetime.now().timetuple()))
                 headers = {'content-type': 'application/json'}
                 payload = {}
-                payload["num-gpus"] = count_num_gpus()
+                payload["num-gpus"] = devices.get_num_gpus()
                 payload["host-id"] = kconfig.host_id
                 payload["agent-time"] = now
-                payload["load1"] = load_info.load1
-                payload["load5"] = load_info.load5
-                payload["load15"] = load_info.load15
-                payload["disk-used"] = disk_info.used
-                payload['memory-used'] = memory_info.used
                 payload["services"] = services_list
+                payload["recover"] = self._recover
                 
                 now_in_ms = now * 1000
                 time_to_report = (now_in_ms - self._last_conda_report) > self._conda_report_interval
@@ -278,7 +270,6 @@ class Heartbeat():
                     payload["private-ip"] = ""
 
                 payload["cores"] = cores
-                payload["disk-capacity"] = disk_info.capacity
                 payload['memory-capacity'] = memory_info.total
                 logger.debug("Sending heartbeat...")
                 resp = session.post(kconfig.heartbeat_url, data=json.dumps(payload), headers=headers, verify=False)
@@ -302,6 +293,7 @@ class Heartbeat():
                 else:
                     theResponse = resp.json()
                     logger.debug("Response from heartbeat is: {0}".format(theResponse))
+                    self._recover = False
                     try:
                         system_commands = theResponse['system-commands']
                         for command in system_commands:
@@ -332,10 +324,14 @@ class Heartbeat():
                 logger.error("{0}. Retrying in {1} seconds...".format(err, kconfig.heartbeat_interval))
                 logged_in = False
 
+CONDA_COMMAND_LOG_PATTERN = "{project_name} {operation} {artifact} {artifact_version} {exit_code} {return_message}"
+CONDA_COMMANDS_LOGGER_NAME = __name__ + "/conda_commands"
+
 class CondaCommandsHandler:
     def __init__(self, conda_commands_status, conda_commands_status_mutex):
         self._conda_commands_status = conda_commands_status
         self._conda_commands_status_mutex = conda_commands_status_mutex
+        self._commands_logger = logging.getLogger(CONDA_COMMANDS_LOGGER_NAME)
 
     def handle(self, command):
         global conda_ongoing
@@ -364,10 +360,17 @@ class CondaCommandsHandler:
             logger.warn("Conda busy executing a command for project: {0}".format(proj))
 
 
+    def _log_conda_command(self, project_name, operation, artifact, artifact_version, exit_code, return_message):
+        log = CONDA_COMMAND_LOG_PATTERN.format(project_name=project_name.strip().lower(),
+                                               operation=operation.strip(),
+                                               artifact=artifact.strip(),
+                                               artifact_version=artifact_version,
+                                               exit_code=exit_code,
+                                               return_message=return_message.strip())
+        self._commands_logger.info(log)
+        
     def _envOp(self, command, arg, offline):
         global conda_ongoing
-        if not arg:
-            arg=""
         user = command['user']
         command_id = command['id']
         op = command['op'].upper()
@@ -375,23 +378,26 @@ class CondaCommandsHandler:
         install_jupyter = str(command['installJupyter']).lower()
 
         tempfile_fd = None
-        if command['op'] == 'YML':
-            tempfile_fd = tempfile.NamedTemporaryFile(suffix='.yml', delete=True)
-            arg = tempfile_fd.name
-            tempfile_fd.write(command['environmentYml'])
-            tempfile_fd.flush()
-            os.chmod(tempfile_fd.name, 0604)
-
         script = kconfig.bin_dir + "/anaconda_env.sh"
         logger.info("sudo {0} {1} {2} {3} {4} '{5}' {6} {7}".format(script, user, op, proj, arg, offline, kconfig.hadoop_home, install_jupyter))
         msg=""
         try:
-            msg = subprocess.check_output(['sudo', script, user, op, proj, arg, offline, kconfig.hadoop_home, install_jupyter], stderr=subprocess.STDOUT)
+            self._log_conda_command(proj, op, proj, arg, -1, 'WORKING')
+            yml_file_path = "''"
+            if command['op'] == 'YML':
+                tempfile_fd = tempfile.NamedTemporaryFile(suffix='.yml', delete=True)
+                yml_file_path = tempfile_fd.name
+                tempfile_fd.write(command['environmentYml'])
+                tempfile_fd.flush()
+                os.chmod(tempfile_fd.name, 0604)
+            msg = subprocess.check_output(['sudo', script, user, op, proj, arg, offline, kconfig.hadoop_home, install_jupyter, yml_file_path], cwd=kconfig.conda_dir, stderr=subprocess.STDOUT)
             command['status'] = 'SUCCESS'
             command['arg'] = arg
+            self._log_conda_command(proj, op, proj, arg, 0, 'SUCCESS')
         except subprocess.CalledProcessError as e:
-            logger.info("Exception in envOp {0}".format(e.output))
-            logger.info("Exception in envOp. Ret code: {0}".format(e.returncode))
+            logger.warn("Exception in envOp {0}".format(e.output))
+            logger.warn("Exception in envOp. Ret code: {0}".format(e.returncode))
+            self._log_conda_command(proj, op, proj, arg, e.returncode, e.output)
             command['status'] = 'FAILED'
         finally:
             if command['op'] == 'YML' and tempfile_fd != None:
@@ -422,14 +428,17 @@ class CondaCommandsHandler:
 
         try:
             command_str = "sudo {0} {1} {2} {3} {4} {5} {6} {7}".format(script, user, op, proj, channelUrl, installType, lib, version)
-            logger.info("Executing libOp command {0}".format(command_str))                                            
-            msg = subprocess.check_output(['sudo', script, user, op, proj, channelUrl, installType, lib, version], stderr=subprocess.STDOUT)
+            logger.info("Executing libOp command {0}".format(command_str))
+            self._log_conda_command(proj, op, lib, version, -1, 'WORKING')
+            msg = subprocess.check_output(['sudo', script, user, op, proj, channelUrl, installType, lib, version], cwd=kconfig.conda_dir, stderr=subprocess.STDOUT)
             logger.info("Lib op finished without error.")
             logger.info("{0}".format(msg))
             command['status'] = 'SUCCESS'
+            self._log_conda_command(proj, op, lib, version, 0, 'SUCCESS')
         except subprocess.CalledProcessError as e:
-            logger.info("Exception in libOp {0}".format(e.output))
-            logger.info("Exception in libOp. Ret code: {0}".format(e.returncode))
+            logger.warn("Exception in libOp {0}".format(e.output))
+            logger.warn("Exception in libOp. Ret code: {0}".format(e.returncode))
+            self._log_conda_command(proj, op, lib, version, e.returncode, e.output)
             command['status'] = 'FAILED'
         finally:
             conda_ongoing[proj] = False
@@ -468,7 +477,7 @@ class SystemCommandsHandler:
         for env in to_be_removed:
             try:
                 script = os.path.join(kconfig.bin_dir, 'anaconda_env.sh')
-                subprocess.check_call(['sudo', script, exec_user, 'REMOVE', env, '', '', '', ''])
+                subprocess.check_call(['sudo', script, exec_user, 'REMOVE', env, '', '', '', ''], cwd=kconfig.conda_dir)
                 logger.info("Removed Anaconda environment {0}".format(env))
                 self._conda_envs_monitor_list.remove(env)
             except CalledProcessError as e:
@@ -594,11 +603,11 @@ class LoadInfo(object):
 ## *removed* along with the method!
 class Config():
 
-    def section_name(self, cluster, group, service=None):
+    def section_name(self, group, service=None):
         if service == None:
-            return "{0}-{1}".format(cluster, group)
+            return "{0}".format(group)
         else:
-            return "{0}-{1}-{2}".format(cluster, group, service)
+            return "{0}-{1}".format(group, service)
 
     def get_section(self, section):
         config_mutex.acquire()
@@ -619,24 +628,6 @@ class Config():
             config_mutex.release()
         return val
 
-class MySQLConnector():
-    @staticmethod
-    def read(database, table):
-        try:
-            db = MySQLdb.connect(unix_socket=kconfig.mysql_socket, db=database)
-            cur = db.cursor()
-            query = "SELECT * FROM {0}".format(table)
-            cur.execute(query)
-            return json.dumps(cur.fetchall())
-        except Exception as err:
-            logger.error("Could not access {0} table from {1}: {2}".format(table, database, err))
-            return json.dumps(["Error", "Error: Could not access {0} table from {1}.".format(table, database)])
-
-    @staticmethod
-    def read_ndbinfo(table):
-        return MySQLConnector.read("ndbinfo", table)
-
-
 class RESTCommandHandler():
 
     def __init__(self, host_services):
@@ -647,7 +638,7 @@ class RESTCommandHandler():
         logger.warn("{0}".format(resp))
         return resp
 
-    def start(self, cluster, group, service):
+    def start(self, group, service):
         if not service in self._host_services:
             return self.error_response(400, "Service not installed.")
         else:
@@ -660,7 +651,7 @@ class RESTCommandHandler():
             else:
                 return self.error_response(400, "Error: Cannot start the service.")
             
-    def stop(self, cluster, group, service):
+    def stop(self, group, service):
         if not service in self._host_services:
             return self.error_response(400, "Service not installed.")
         else:
@@ -676,7 +667,7 @@ class RESTCommandHandler():
                 return self.error_response(400, "Error: Cannot stop the service.")
 
             
-    def restart(self, cluster, group, service):
+    def restart(self, group, service):
         if not service in self._host_services:
             return self.error_response(400, "Service not installed.")
         else:
@@ -687,7 +678,7 @@ class RESTCommandHandler():
                 return self.error_response(400, "Error: Cannot restart the service.")
 
             
-    def read_log(self, cluster, group, service, lines):
+    def read_log(self, group, service, lines):
         try:
             lines = int(lines)
 
@@ -719,7 +710,7 @@ class RESTCommandHandler():
         log = "".join(str(x) for x in lines)
         return log
     
-    def read_config(self, cluster, group, service):
+    def read_config(self, group, service):
         try:
             if service not in self._host_services:
                 return self.error_response(400, "Service not installed.")
@@ -732,12 +723,12 @@ class RESTCommandHandler():
             logger.error(err)
             return self.error_response(400, "Cannot read file.")
 
-    def info(self, cluster, group, service):
+    def info(self, group, service):
         try:
             if service is None:
-                section_name = "{0}-{1}".format(cluster, group)
+                section_name = "{0}".format(group)
             else:
-                section_name = "{0}-{1}-{2}".format(cluster, group, service)
+                section_name = "{0}-{1}".format(group, service)
 
             items = {}
             for key, val in services.items(section):
@@ -750,18 +741,14 @@ class RESTCommandHandler():
             logger.error(err)
             return self.error_response(400, "Cannot read file.")
 
-    def read_ndbinfo(self, table):
-        res = MySQLConnector.read_ndbinfo(table)
-        return res
-
     ## Antonis: Most probably we don't need this and it should be
     ## removed in the future
-    def execute(self, cluster, group, service, command, params):
+    def execute(self, group, service, command, params):
         try:
             if service == None:
-                section = Config().section_name(cluster, group)
+                section = Config().section_name(group)
             else:
-                section = Config().section_name(cluster, group, service)
+                section = Config().section_name(group, service)
             script = Config().get(section, "command-script")
             logger.info("Script name executing is: {0}".format(script))
             env = Config().get(section, "command-env")
@@ -801,7 +788,6 @@ class SSLCherryPy(ServerAdapter):
 def construct_services(k_config, hw_http_client):
     host_services = {}
     for c_service in services.sections():
-        cluster = services.get(c_service, 'cluster')
         group = services.get(c_service, 'group')
         if services.has_option(c_service, 'service'):
             service_name = services.get(c_service, 'service')
@@ -811,19 +797,36 @@ def construct_services(k_config, hw_http_client):
                 fail_attempts = 1
             stdout_file = services.get(c_service, "stdout-file")
             config_file = services.get(c_service, "config-file")
-            k_service = kagent_utils.Service(cluster, group, service_name, stdout_file,
+            k_service = kagent_utils.Service(group, service_name, stdout_file,
                                              config_file, fail_attempts, k_config, hw_http_client)
             host_services[service_name] = k_service
-        else:
-            logger.info("Not watching %s/%s/%s", cluster, group, service_name)
     return host_services
-            
+
+# Maintain order of services from services file
+def construct_ordered_services_list(k_config, hw_http_client):
+    host_services = []
+    for c_service in services.sections():
+        group = services.get(c_service, 'group')
+        if services.has_option(c_service, 'service'):
+            service_name = services.get(c_service, 'service')
+            if services.has_option(c_service, 'fail-attempts'):
+                fail_attempts = services.getint(c_service, 'fail-attempts')
+            else:
+                fail_attempts = 1
+            stdout_file = services.get(c_service, "stdout-file")
+            config_file = services.get(c_service, "config-file")
+            k_service = kagent_utils.Service(group, service_name, stdout_file,
+                                             config_file, fail_attempts, k_config, hw_http_client)
+            host_services.append(k_service)
+    return host_services
+
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Hops nodes administration agent')
     parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('-c', '--config', default='config.ini', help='Path to configuration file')
+    parser.add_argument('-s', '--services', choices=('start', 'stop', 'status'), help="Start/stop/status all local services and exit")
 
     args = parser.parse_args()
     
@@ -833,10 +836,27 @@ if __name__ == '__main__':
     kconfig = KConfig(args.config)
     kconfig.read_conf()
 
+    create_log_dir_if_not(kconfig)
     setupLogging(kconfig)
+    prepare_conda_commands_logger(kconfig)
     readServicesFile()
         
     hw_http_client = kagent_utils.Http(kconfig)
+
+    if args.services:
+        ordered_host_services = construct_ordered_services_list(kconfig, hw_http_client)
+        if args.services == 'start':
+            for service in ordered_host_services:
+                if not service.start():
+                    service.start()
+        elif args.services == 'stop':
+            for service in reversed(ordered_host_services):
+                if not service.stop():
+                    service.stop()
+        elif args.services == 'status':
+            for service in ordered_host_services:
+                service.alive(currently=True)
+        sys.exit(-1)
 
     host_services = construct_services(kconfig, hw_http_client)
 
@@ -917,80 +937,60 @@ if __name__ == '__main__':
     def _authentication_error():
         return HTTPResponse(status=400, output="Invalid password")
         
-    @get('/restartService/<cluster>/<group>/<service>')
-    def restartService(cluster, group, service):
-        logger.info('Incoming REST Request:  GET /restartService/{0}/{1}/{2}'.format(cluster, group, service))
+    @get('/restartService/<group>/<service>')
+    def restartService(group, service):
+        logger.info('Incoming REST Request:  GET /restartService/{0}/{1}'.format(group, service))
         if not _authenticate():
             return _authentication_error()
 
         if not service in host_services:
-            return HTTPResponse(status=400, output='Cluster/Group/Service not available.')
+            return HTTPResponse(status=400, output='Group/Service not available.')
 
-        return rest_command_handler.restart(cluster, group, service);
+        return rest_command_handler.restart(group, service);
 
-    @get('/startService/<cluster>/<group>/<service>')
-    def startService(cluster, group, service):
-        logger.info('Incoming REST Request:  GET /startService/{0}/{1}/{2}'.format(cluster, group, service))
+    @get('/startService/<group>/<service>')
+    def startService(group, service):
+        logger.info('Incoming REST Request:  GET /startService/{0}/{1}'.format(group, service))
         if not _authenticate():
             return _authentication_error()
 
         if not service in host_services:
-            return HTTPResponse(status=400, output='Cluster/Group/Service not available.')
+            return HTTPResponse(status=400, output='Group/Service not available.')
 
-        return rest_command_handler.start(cluster, group, service);
+        return rest_command_handler.start(group, service);
 
-    @get('/stopService/<cluster>/<group>/<service>')
-    def stopService(cluster, group, service):
-        logger.info('Incoming REST Request:  GET /stopService/{0}/{1}/{2}'.format(cluster, group, service))
+    @get('/stopService/<group>/<service>')
+    def stopService(group, service):
+        logger.info('Incoming REST Request:  GET /stopService/{0}/{1}'.format(group, service))
         if not _authenticate():
             return _authentication_error()
 
         if not service in host_services:
-            return HTTPResponse(status=400, output='Cluster/Group/Service not available.')
+            return HTTPResponse(status=400, output='Group/Service not available.')
 
-        return rest_command_handler.stop(cluster, group, service);
+        return rest_command_handler.stop(group, service);
 
-    @get('/log/<cluster>/<group>/<service>/<lines>')
-    def log(cluster, group, service, lines):
-        logger.info('Incoming REST Request:  GET /log/{0}/{1}/{2}/{3}'.format(cluster, group, service, lines))
+    @get('/config/<group>/<service>')
+    def config(group, service):
+        logger.info('Incoming REST Request:  GET /log/{0}/{1}'.format(group, service))
         if not _authenticate():
             return _authentication_error()
 
         if not service in host_services:
-            return HTTPResponse(status=400, output='Cluster/Group/Service not available.')
+            return HTTPResponse(status=400, output='Group/Service not available.')
 
-        return rest_command_handler.read_log(cluster, group, service, lines);
+        return rest_command_handler.read_config(group, service);
 
-
-    @get('/agentlog/<lines:int>')
-    def agentlog(lines):
-        logger.info('Incoming REST Request:  GET /agentlog/{0}'.format(lines))
-        if not _authenticate():
-            return _authentication_error()
-
-        return rest_command_handler.read_agent_log(lines);
-
-    @get('/config/<cluster>/<group>/<service>')
-    def config(cluster, group, service):
-        logger.info('Incoming REST Request:  GET /log/{0}/{1}/{2}'.format(cluster, group, service))
+    @get('/info/<group>/<service>')
+    def info(group, service):
+        logger.info('Incoming REST Request:  GET /status/{0}/{1}'.format(group, service))
         if not _authenticate():
             return _authentication_error()
 
         if not service in host_services:
-            return HTTPResponse(status=400, output='Cluster/Group/Service not available.')
+            return HTTPResponse(status=400, output='Group/Service not available.')
 
-        return rest_command_handler.read_config(cluster, group, service);
-
-    @get('/info/<cluster>/<group>/<service>')
-    def info(cluster, group, service):
-        logger.info('Incoming REST Request:  GET /status/{0}/{1}/{2}'.format(cluster, group, service))
-        if not _authenticate():
-            return _authentication_error()
-
-        if not service in host_services:
-            return HTTPResponse(status=400, output='Cluster/Group/Service not available.')
-
-        return rest_command_handler.info(cluster, group, service);
+        return rest_command_handler.info(group, service);
 
     @get('/refresh')  # request heartbeat
     def refresh():
@@ -1000,17 +1000,9 @@ if __name__ == '__main__':
 
         return rest_command_handler.refresh();
 
-    @get('/mysql/ndbinfo/<table>')
-    def mysql_read(table):
-        logger.info('Incoming REST Request:  GET /mysql/ndbinfo/{0}'.format(table))
-        if not _authenticate():
-            return _authentication_error()
-
-        return rest_command_handler.read_ndbinfo(table)
-
-    @post('/execute/<state>/<cluster>/<group>/<service>/<command>')
-    def execute_hdfs(state, cluster, group, service, command):
-        logger.info('Incoming REST Request:  POST /execute/{0}/{1}/{2}/{3}/{4}'.format(state, cluster, group, service, command))
+    @post('/execute/<state>/<group>/<service>/<command>')
+    def execute_hdfs(state, group, service, command):
+        logger.info('Incoming REST Request:  POST /execute/{0}/{1}/{2}/{3}'.format(state, group, service, command))
         if not _authenticate():
             return _authentication_error()
         
@@ -1020,11 +1012,10 @@ if __name__ == '__main__':
             params = ""
         if state == "run" :
             if service == "-":
-                return rest_command_handler.execute(cluster, group, None, command, params);
+                return rest_command_handler.execute(group, None, command, params);
             else:
-                return rest_command_handler.execute(cluster, group, service, command, params);
+                return rest_command_handler.execute(group, service, command, params);
         return rest_command_handler.response(404, "Error")
-
 
 
     @get('/conda/<user>/<command_id>/<op>/<proj>/<lib>')

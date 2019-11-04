@@ -5,6 +5,7 @@ service_name = "kagent"
 
 agent_password = ""
 
+
 # First try to read from Chef attributes
 if node["kagent"]["password"].empty? == false
  agent_password = node["kagent"]["password"]
@@ -23,6 +24,25 @@ end
 if agent_password.empty?
   agent_password = SecureRandom.hex[0...10]
 end
+
+
+
+if !node['install']['cloud'].empty? 
+  template "#{node['kagent']['base_dir']}/bin/edit-config-ini-inplace.py" do
+    source "edit-config-ini-inplace.py.erb"
+    owner node['kagent']['user']
+    group node['kagent']['group']
+    mode 0744
+  end
+
+  template "#{node['kagent']['base_dir']}/bin/edit-and-start.sh" do
+    source "edit-and-start.sh.erb"
+    owner node['kagent']['user']
+    group node['kagent']['group']
+    mode 0744
+  end
+end
+
 
 case node[:platform]
 when "ubuntu"
@@ -64,6 +84,14 @@ if node[:systemd] == "true"
     action :systemd_reload
   end
   
+  if node['kagent']['enabled'].casecmp? "true"
+    kagent_config service_name do
+      service "kagent"
+      config_file "#{node["kagent"]["etc"]}/config.ini"
+      log_file "#{node["kagent"]["dir"]}/logs/agent.log"
+      restart_agent false
+    end
+  end  
 else # sysv
 
   service "#{service_name}" do
@@ -92,33 +120,12 @@ end
 private_ip = my_private_ip()
 public_ip = my_public_ip()
 
-dashboard_endpoint = "10.0.2.15"  + ":" + node["kagent"]["dashboard"]["port"]
-
+dashboard_endpoint = private_recipe_ip("hopsworks","default")  + ":8181" 
 if node.attribute? "hopsworks"
-  begin
-    if node["hopsworks"].attribute? "port"
-      dashboard_endpoint = private_recipe_ip("hopsworks","default")  + ":" + node["hopsworks"]["port"]
-    else
-      dashboard_endpoint = private_recipe_ip("hopsworks","default")  + ":" + node["kagent"]["dashboard"]["port"]
-    end
-  rescue
-    dashboard_endpoint =
-    Chef::Log.warn "could not find the hopsworks server ip to register kagent to!"
+  if node["hopsworks"].attribute? "https" and node["hopsworks"]['https'].attribute? ('port')
+    dashboard_endpoint = private_recipe_ip("hopsworks","default")  + ":" + node['hopsworks']['https']['port']
   end
 end
-
-network_if = node["kagent"]["network"]["interface"]
-
-# If the network i/f name not set by the user, set default values for ubuntu and centos
-if network_if == ""
-  case node["platform_family"]
-  when "debian"
-    network_if = "eth0"
-  when "rhel"
-    network_if = "enp0s3"
-  end
-end
-
 
 template "#{node["kagent"]["home"]}/bin/start-all-local-services.sh" do
   source "start-all-local-services.sh.erb"
@@ -142,38 +149,18 @@ template "#{node["kagent"]["home"]}/bin/status-all-local-services.sh" do
   mode 0740
 end
 
-
-#
-# Certificate Signing code - Needs Hopsworks dashboard
-#
-
-
-template "#{node["kagent"]["home"]}/keystore.sh" do
-  source "keystore.sh.erb"
-  owner node["kagent"]["user"]
-  group node["kagent"]["group"]
-  mode 0700
-   variables({
-              :directory => node["kagent"]["keystore_dir"],
-              :keystorepass => node["hopsworks"]["master"]["password"]
-            })
-end
-
 # Default to hostname found in /etc/hosts, but allow user to override it.
 # First with DNS. Highest priority if user supplies the actual hostname
-hostname = node['fqdn']  
+hostname = node['fqdn']
 
-if node["kagent"].attribute?("hostname")
-   if node["kagent"]["hostname"].empty? == false
-      hostname = node["kagent"]["hostname"]
-   end
+if node['install']['localhost'].casecmp?("true")
+  hostname = "localhost"
 end
 
 Chef::Log.info "Hostname to register kagent in config.ini is: #{hostname}"
 if hostname.empty?
   raise "Hostname in kagent/config.ini cannot be empty"
 end
-
 
 hops_dir=node['install']['dir']
 if node.attribute?("hops") && node["hops"].attribute?("dir") 
@@ -199,24 +186,36 @@ template "#{node["kagent"]["etc"]}/config.ini" do
   mode 0600
   action :create
   variables({
-              :rest_url => "http://#{dashboard_endpoint}/",
+              :rest_url => "https://#{dashboard_endpoint}/",
               :rack => '/default',
               :hostname => hostname,
               :public_ip => public_ip,
               :private_ip => private_ip,
-              :network_if => network_if,
               :hops_dir => hops_dir,
               :agent_password => agent_password,
               :kstore => "#{node["kagent"]["keystore_dir"]}/#{hostname}__kstore.jks",
               :tstore => "#{node["kagent"]["keystore_dir"]}/#{hostname}__tstore.jks",
               :blacklisted_envs => blacklisted_envs
             })
-  
 if node["services"]["enabled"] == "true"  
   notifies :enable, "service[#{service_name}]"
 end
   notifies :restart, "service[#{service_name}]", :delayed
 end
+
+
+template "#{node["kagent"]["home"]}/keystore.sh" do
+  source "keystore.sh.erb"
+  owner node["kagent"]["user"]
+  group node["kagent"]["group"]
+  mode 0700
+  variables({
+              :fqdn => hostname,
+              :directory => node["kagent"]["keystore_dir"],
+              :keystorepass => node["hopsworks"]["master"]["password"]
+            })
+end
+  
 
 if node["kagent"]["test"] == false && node['install']['upgrade'] == "false"
     kagent_keys "sign-certs" do
@@ -224,32 +223,18 @@ if node["kagent"]["test"] == false && node['install']['upgrade'] == "false"
     end
 end
 
+bash "convert private key to PKCS#1 format on update" do
+  user "root"
+  group node['kagent']['certs_group']
+  code <<-EOH                                                                                                       
+       openssl rsa -in #{node['kagent']['certs_dir']}/priv.key -out #{node['kagent']['certs_dir']}/priv.key.rsa
+       chmod 640 #{node['kagent']['certs_dir']}/priv.key.rsa
+       chown root:#{node['kagent'['certs_group']]} #{node['kagent']['certs_dir']}/priv.key.rsa
+  EOH
+  only_if { node['install']['upgrade'].casecmp? "true" and File.exists?("#{node['kagent']['certs_dir']}/priv.key")}
+end
 
 execute "rm -f #{node["kagent"]["pid_file"]}"
-
-case node['platform_family']
-when "rhel"
-  # bash "disable-iptables" do
-  #   code <<-EOH
-  #   service iptables stop
-  # EOH
-  #   only_if "test -f /etc/init.d/iptables && service iptables status"
-  # end
-  
-end
-
-if node["kagent"]["allow_ssh_access"] == 'true'
-  homedir = "/home/#{node["kagent"]["user"]}"
-  kagent_keys "#{homedir}" do
-    cb_user "#{node["kagent"]["user"]}"
-    cb_group "#{node["kagent"]["group"]}"
-    cb_name "hopsworks"
-    cb_recipe "default"  
-    action :get_publickey
-  end  
-end
-
-
 
 if node["kagent"]["cleanup_downloads"] == 'true'
 
