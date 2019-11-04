@@ -1,4 +1,23 @@
-# ubuntu python-mysqldb package install only works if we first run "apt-get update; apt-get upgrade"
+######################################
+## Do sanity checks here, fail fast ##
+######################################
+
+# If FQDN is longer than 63 characters fail HOPSWORKS-1075
+fqdn = node['fqdn']
+raise "FQDN #{fqdn} is too long! It should not be longer than 60 characters" unless fqdn.length < 61
+
+# If installing EE check that everything is set
+if node['install']['enterprise']['install'].casecmp? "true"
+  if not node['install']['enterprise']['download_url']
+    raise "Installing Hopsworks EE but install/enterprise/download_url is not set"
+  end
+  if node['install']['enterprise']['username'] and not node['install']['enterprise']['password']
+    raise "Installing Hopsworks EE, username is set but not password"
+  end
+  if node['install']['enterprise']['password'] and not node['install']['enterprise']['username']
+    raise "Installing Hopsworks EE, password is set but not username"
+  end    
+end
 
 case node["platform_family"]
 when "debian"
@@ -22,12 +41,10 @@ when "debian"
 
   package "python2.7" 
   package "python2.7-dev"
-  # Needed by pip install MySQL-python
-  package "libmysqlclient-dev"
 
 when "rhel"
 
-  if node['rhel']['epel']
+  if node['rhel']['epel'].downcase == "true"
     package "epel-release"
   end
 
@@ -42,8 +59,6 @@ when "rhel"
   package "python-pip" 
   package "python-devel" 
   package "jq"
-  # MySQL-python needs libmysqlclient which in Centos is provided by mariadb-devel
-  package "mariadb-devel"
   # Change lograte policy
   cookbook_file '/etc/logrotate.d/syslog' do
     source 'syslog.centos'
@@ -63,11 +78,13 @@ end
 group node["kagent"]["group"] do
   action :create
   not_if "getent group #{node["kagent"]["group"]}"
+  not_if { node['install']['external_users'].casecmp("true") == 0 }
 end
 
 group node["kagent"]["certs_group"] do
   action :create
   not_if "getent group #{node["kagent"]["certs_group"]}"
+  not_if { node['install']['external_users'].casecmp("true") == 0 }
 end
 
 user node["kagent"]["user"] do
@@ -78,18 +95,28 @@ user node["kagent"]["user"] do
   shell "/bin/bash"
   system true
   not_if "getent passwd #{node["kagent"]["user"]}"
+  not_if { node['install']['external_users'].casecmp("true") == 0 }
 end
 
 group node["kagent"]["group"] do
   action :modify
   members ["#{node["kagent"]["user"]}"]
   append true
+  not_if { node['install']['external_users'].casecmp("true") == 0 }
 end
 
 group node["kagent"]["certs_group"] do
   action :modify
   members ["#{node["kagent"]["user"]}"]
   append true
+  not_if { node['install']['external_users'].casecmp("true") == 0 }
+end
+
+group "video"  do
+  action :modify
+  members ["#{node["kagent"]["user"]}"]
+  append true
+  not_if { node['install']['external_users'].casecmp("true") == 0 }
 end
 
 bash "make_gemrc_file" do
@@ -213,6 +240,7 @@ template "#{node["kagent"]["certs_dir"]}/run_csr.sh" do
   mode 0710
 end
 
+
 ['start-agent.sh', 'stop-agent.sh', 'restart-agent.sh', 'get-pid.sh'].each do |script|
   Chef::Log.info "Installing #{script}"
   template "#{node["kagent"]["home"]}/bin/#{script}" do
@@ -223,7 +251,7 @@ end
   end
 end 
 
-['start-service.sh', 'stop-service.sh', 'restart-service.sh', 'status-service.sh', 'gpu-kill.sh', 'gpu-killhard.sh'].each do |script|
+['status-service.sh', 'gpu-kill.sh', 'gpu-killhard.sh'].each do |script|
   template  "#{node["kagent"]["home"]}/bin/#{script}" do
     source "#{script}.erb"
     owner "root"
@@ -287,6 +315,14 @@ template "#{node["kagent"]["home"]}/bin/anaconda_sync.sh" do
   action :create
 end
 
+ruby_block "whereis_systemctl" do
+  block do
+    Chef::Resource::RubyBlock.send(:include, Chef::Mixin::ShellOut)
+    systemctl_path = shell_out("which systemctl").stdout
+    node.override['kagent']['systemctl_path'] = systemctl_path.strip
+  end
+end
+
 template "/etc/sudoers.d/kagent" do
   source "sudoers.erb"
   owner "root"
@@ -296,14 +332,10 @@ template "/etc/sudoers.d/kagent" do
                 :user => node["kagent"]["user"],
                 :conda =>  "#{node["kagent"]["base_dir"]}/bin/conda.sh",
                 :anaconda =>  "#{node["kagent"]["base_dir"]}/bin/anaconda_env.sh",
-                :start => "#{node["kagent"]["base_dir"]}/bin/start-service.sh",
-                :stop => "#{node["kagent"]["base_dir"]}/bin/stop-service.sh",
-                :restart => "#{node["kagent"]["base_dir"]}/bin/restart-service.sh",
-                :startall => "#{node["kagent"]["base_dir"]}/bin/start-all-local-services.sh",
-                :stopall => "#{node["kagent"]["base_dir"]}/bin/shutdown-all-local-services.sh",
                 :rotate_service_key => "#{node[:kagent][:certs_dir]}/run_csr.sh",
                 :gpu_kill => "#{node["kagent"]["base_dir"]}/bin/gpu-kill.sh",
-                :gpu_killhard => "#{node["kagent"]["base_dir"]}/bin/gpu-killhard.sh"
+                :gpu_killhard => "#{node["kagent"]["base_dir"]}/bin/gpu-killhard.sh",
+                :systemctl_path => lazy { node['kagent']['systemctl_path'] }
               })
   action :create
 end  

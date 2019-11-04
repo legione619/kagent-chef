@@ -3,13 +3,14 @@ action :csr do
   bash "sign-local-csr-key" do
     user "root"
     retries 4
+    retry_delay 10
     timeout 300
     code <<-EOF
       set -eo pipefail
       export PYTHON_EGG_CACHE=/tmp
       #{node[:conda][:base_dir]}/envs/hops-system/bin/python #{node[:kagent][:certs_dir]}/csr.py \
       -c #{node[:kagent][:etc]}/config.ini init
-  EOF
+    EOF
     not_if { ::File.exists?( "#{node['kagent']['certs_dir']}/priv.key" ) }
   end
 
@@ -23,8 +24,17 @@ action :csr do
       chown root:#{node["kagent"]["certs_group"]} pub.pem priv.key hops_intermediate_ca.pem hops_root_ca.pem
       rm -f #{node["kagent"]["base_dir"]}/kagent.pid
     EOH
+    only_if { ::File.exists?( "#{node['kagent']['certs_dir']}/priv.key" ) }    
   end
-
+  
+  bash "chown private PKCS#1" do
+    user "root"
+    code <<-EOH
+      set -eo pipefail 
+      chown root:#{node["kagent"]["certs_group"]} #{node["kagent"]["certs_dir"]}/priv.key.rsa
+    EOH
+    only_if { ::File.exists?( "#{node['kagent']['certs_dir']}/priv.key.rsa" ) }
+  end
 end
 
 

@@ -1,8 +1,5 @@
 include_attribute "conda"
 
-# hops-util-py version, when value is "master" install from git, when value is "0.6.0.0" do pip install hops==0.6.0.0
-default["kagent"]["hops-util-py-version"] = "0.9.1.1"
-
 # Default values for configuration parameters
 default["kagent"]["version"]                       = node["install"]["version"]
 default["kagent"]["user"]                          = node["install"]["user"].empty? ? "kagent" : node["install"]["user"]
@@ -38,8 +35,6 @@ default["hopsworks"]["master"]["password"]         = "adminpw"
 default["kagent"]["certificate_file"]              = "server.pem"
 
 # dashboard ip:port endpoint
-default["kagent"]["dashboard"]["ip"]               = "10.0.2.15"
-default["kagent"]["dashboard"]["port"]             = "8080"
 default["kagent"]["dashboard_app"]                 = "hopsworks-api"
 default["kagent"]["ca_app"]                        = "hopsworks-ca"
 
@@ -61,12 +56,7 @@ default["kagent"][:default][:gateway_ips]             = ['10.0.2.2']
 
 default["kagent"]["services"]                      = node["kagent"]["etc"] + "/services"
 
-# name of cluster as shown in Dashboard
-default["kagent"]["cluster"]                       = "Hops"
-
 default["kagent"]["hostid"]                        = 100
-
-default["kagent"]["hostname"]                      =
 
 default["kagent"]["password"]                      = ""
 
@@ -77,22 +67,18 @@ default["kagent"]["dns"]                           = "false"
 default["public_ips"]                              = ['10.0.2.15']
 default["private_ips"]                             = ['10.0.2.15']
 default["gateway_ips"]                             = ['10.0.2.2']
-default["kagent"]["allow_ssh_access"]              = "false"
 
-node.default["download_url"]                       = "http://193.10.67.171/hops"
-node.default["systemd"]                            = "true"
-node.default["ndb"]["mysql_socket"]                = "/tmp/mysql.sock"
-node.default["ndb"]["mysql.jdbc_url"]              = ""
-node.default["ndb"]["mysql_port"]                  = "3306"
+default["download_url"]                       = "http://193.10.67.171/hops"
+default["systemd"]                            = "true"
 
-node.default["vagrant"]                            = "false"
+default["vagrant"]                            = "false"
 
-node.default["ntp"]["install"]                     = "false"
+default["ntp"]["install"]                     = "false"
 # Servers to sync ntp time with
 # '0.pool.ntp.org', '1.pool.ntp.org'
-node.normal["ntp"]["servers"]                      = ['0.europe.pool.ntp.org', '1.europe.pool.ntp.org', '2.europe.pool.ntp.org', '3.europe.pool.ntp.org']
+normal["ntp"]["servers"]                      = ['0.europe.pool.ntp.org', '1.europe.pool.ntp.org', '2.europe.pool.ntp.org', '3.europe.pool.ntp.org']
 
-node.normal["ntp"]["peers"]                        = ['time0.int.example.org', 'time1.int.example.org']
+normal["ntp"]["peers"]                        = ['time0.int.example.org', 'time1.int.example.org']
 
 default["kagent"]["test"]                          = false
 
@@ -100,28 +86,13 @@ default["kagent"]["test"]                          = false
 default["kagent"]["keystore"]                      = "#{node["kagent"]["base_dir"]}/node_server_keystore.jks"
 default["kagent"]["keystore_password"]             = "changeit"
 
-
-default["smtp"]["host"]                            = "smtp.gmail.com"
-default["smtp"]["port"]                            = "587"
-default["smtp"]["ssl_port"]                        = "465"
-default["smtp"]["email"]                           = "smtp@gmail.com"
-default["smtp"]["email_password"]                  = "password"
-default["smtp"]["gmail.placeholder"]               = "http://snurran.sics.se/hops/hopsworks.email"
-
-
 default["services"]["enabled"]                     = "true"
 
 default["certs"]["dir"]                            = node["install"]["dir"].empty? ? node["kagent"]["dir"] + "/certs-dir" : node["install"]["dir"] + "/certs-dir"
-
-default['mml']['version']                          = "0.13"
-# https://mmlspark.azureedge.net/pip/mmlspark-0.12-py2.py3-none-any.whl
-# spark.jars.packages=Azure:mmlspark:0.12
-default["mml"]["url"]                              = node["download_url"] + "/mmlspark-" + node['mml']['version'] + "-py2.py3-none-any.whl"
-
-default['pydoop']['version']                       = "2.0a3"
 
 default["java"]["install_flavor"]                  = "openjdk"
 default["java"]["jdk_version"]                     = 8
 
 default["kagent"]["conda_gc_interval"]             = "1h"
+
 default["kagent"]["python_conda_versions"]         = "2.7, 3.6"

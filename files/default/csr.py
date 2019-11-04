@@ -21,6 +21,7 @@ import subprocess
 
 from OpenSSL import crypto
 from os.path import join, exists
+from cryptography.hazmat.primitives import serialization
 
 from kagent_utils import KConfig
 from kagent_utils import StateStoreFactory
@@ -33,6 +34,7 @@ class Certificate:
         self._config = config
         self._state_store = state_store
         self._private_key = None
+        self._private_key_rsa = None
         self._certificate = None
         self._intermediate_ca = None
         self._root_ca = None
@@ -75,6 +77,11 @@ class Certificate:
         csr.sign(pKey, 'sha256')
         self.csr_req = crypto.dump_certificate_request(crypto.FILETYPE_PEM, csr)
         self._private_key = crypto.dump_privatekey(crypto.FILETYPE_PEM, pKey)
+        cryptography_key = pKey.to_cryptography_key()
+        self._private_key_rsa = cryptography_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption())
         self._LOG.debug("Finished CSR")
 
     def keystoresExist(self):
@@ -100,9 +107,15 @@ class Certificate:
             with open(join(cert_dir, self._config.key_file), "wt") as fd:
                 fd.write(self._private_key)
 
+        # OpenSSL traditional format PKCS#1, MySQL assumes this format when we enable TLS connections
+        if self._private_key_rsa:
+            with open(join(cert_dir, self._config.key_file + ".rsa"), "wt") as fd:
+                fd.write(self._private_key_rsa)
+                
         if self._certificate is not None:
             with open(join(cert_dir, self._config.certificate_file), "wt") as fd:
                 fd.write(self._certificate)
+
         self._LOG.info("Flushed crypto material to filesystem")
         
     def _generate_key(self):
@@ -150,9 +163,10 @@ class Host:
 
     def _sign_csr(self, session):
         """Sends CSR to HopsCA and gets the signed X509 certificate"""
-        self._login(session)
+        jwt = self._login(session)
         payload = {}
         payload["csr"] = self._certificate.csr_req
+        self.json_headers['Authorization'] = jwt
         self._LOG.info("Sending CSR")
         response = session.post(self._conf.ca_host_url, headers=self.json_headers, data=json.dumps(payload), verify=False)
         if (response.status_code != requests.codes.ok):
@@ -184,8 +198,9 @@ class Host:
         cert_identifier = hostname + "__" + str(version_to_revoke)
         params = {"certId": cert_identifier}
         self._LOG.info("Revoking certificate {0}".format(cert_identifier))
-        self._login(session)
-        response = session.delete(self._conf.ca_host_url, params=params)
+        jwt = self._login(session)
+        self.json_headers['Authorization'] = jwt
+        response = session.delete(self._conf.ca_host_url, headers=self.json_headers, params=params)
         
     def _register_host_internal(self, session):
         self._login(session)
@@ -232,6 +247,7 @@ class Host:
 
         self._LOG.debug("Logged in successfully")        
 
+        return response.headers['Authorization']
         
 def setup_logging(log_file, max_log_size, logLevel):
     """Setup logging utilities"""
@@ -298,7 +314,7 @@ if __name__ == '__main__':
                 subprocess.check_call(config.keystore_script)
             except Exception, e:
                 LOG.error("Error while registering host: {0}".format(e))
-                raise e
+                sys.exit(3)
             
     elif args.operation == "rotate":
         LOG.debug("Key rotation")

@@ -96,11 +96,46 @@ module Kagent
 #      end
     end
 
+
+    def exists_local(cookbook, recipe)
+      my_ip = my_private_ip()
+      service_ips = private_recipe_ips(cookbook,recipe)
+
+      if service_ips.nil?
+        return false
+      end
+
+      found = false
+      for host in service_ips
+        if my_ip.eql? host
+          found = true
+        end
+      end
+      return found
+    end
+
+    
     def private_recipe_ips(cookbook, recipe)
       valid_recipe(cookbook,recipe)
       return node[cookbook][recipe][:private_ips]
     end
 
+    def resolve_hostname(ip)
+      require 'resolv'
+      hostf = Resolv::Hosts.new
+      dns = Resolv::DNS.new
+      # Try and resolve hostname first using /etc/hosts, then use DNS
+      begin
+        hostname = hostf.getname(ip)
+      rescue
+        begin
+          hostname = dns.getname(ip)
+        rescue
+          raise "Cannot resolve the hostname for IP address: #{ip}"
+        end
+      end      
+    end
+    
     def private_recipe_hostnames(cookbook, recipe)
       valid_recipe(cookbook,recipe)
       hostf = Resolv::Hosts.new
@@ -213,18 +248,14 @@ module Kagent
       node.normal["ndb"]["connectstring"] = connectString
     end
 
-    def jdbc_url()
-      # The first mysqld that a NN should contact is localhost
-      # On failure, contact other mysqlds. We should configure
-      # the mysqlconnector to use the first localhost and only failover
-      # to other mysqlds
-      jdbcUrl = "localhost:#{node["ndb"]["mysql_port"]},"
-      for n in node["ndb"]["mysqld"]["private_ips"]
-        fqdn = dns_lookup(n)
-        jdbcUrl += "#{fqdn}:#{node["ndb"]["mysql_port"]},"
-      end
-      jdbcUrl = jdbcUrl.chop
-      node.normal["ndb"]["mysql"]["jdbc_url"] = "jdbc:mysql://" + jdbcUrl + "/"
+    def get_ee_basic_auth_header()
+      # NOTE FOR YOU: Remember to add 'sensitive true' as remote_file property
+      username = node['install']['enterprise']['username']
+      password = node['install']['enterprise']['password']
+      credentials_b64 = Base64.encode64("#{username}:#{password}").gsub("\n", "")
+      header = {}
+      header['Authorization'] = "Basic #{credentials_b64}"
+      header
     end
   end
 end
