@@ -5,7 +5,7 @@ name             "kagent"
 license          "GPL 2.0"
 description      "Installs/Configures the Karamel agent used by Hops"
 long_description IO.read(File.join(File.dirname(__FILE__), 'README.md'))
-version          "1.0.0"
+version          "1.2.0"
 source_url       "https://github.com/karamelchef/kagent-chef"
 
 
@@ -32,6 +32,14 @@ attribute "kagent/user",
 
 attribute "kagent/group",
           :description => "group to run kagent as",
+          :type => 'string'
+
+attribute "kagent/certs_user",
+          :description => "User managing the host certificates",
+          :type => 'string'
+
+attribute "kagent/certs_group",
+          :description => "Group having access to the host certificates",
           :type => 'string'
 
 attribute "kagent/dir",

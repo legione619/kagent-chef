@@ -98,20 +98,24 @@ module Kagent
 
 
     def exists_local(cookbook, recipe)
-      my_ip = my_private_ip()
-      service_ips = private_recipe_ips(cookbook,recipe)
+      begin
+        my_ip = my_private_ip()
+        service_ips = private_recipe_ips(cookbook,recipe)
 
-      if service_ips.nil?
+        if service_ips.nil?
+          return false
+        end
+
+        found = false
+        for host in service_ips
+          if my_ip.eql? host
+            found = true
+          end
+        end
+        return found
+      rescue
         return false
       end
-
-      found = false
-      for host in service_ips
-        if my_ip.eql? host
-          found = true
-        end
-      end
-      return found
     end
 
     
@@ -252,6 +256,9 @@ module Kagent
       # NOTE FOR YOU: Remember to add 'sensitive true' as remote_file property
       username = node['install']['enterprise']['username']
       password = node['install']['enterprise']['password']
+      if username.nil? and password.nil?
+        return {}
+      end
       credentials_b64 = Base64.encode64("#{username}:#{password}").gsub("\n", "")
       header = {}
       header['Authorization'] = "Basic #{credentials_b64}"

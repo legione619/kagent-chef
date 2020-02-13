@@ -4,7 +4,9 @@ include_attribute "conda"
 default["kagent"]["version"]                       = node["install"]["version"]
 default["kagent"]["user"]                          = node["install"]["user"].empty? ? "kagent" : node["install"]["user"]
 default["kagent"]["group"]                         = node["install"]["user"].empty? ? "kagent" : node["install"]["user"]
+
 default["kagent"]["certs_group"]                   = "certs"
+default["kagent"]["certs_user"]                    = "certs"
 
 
 default["kagent"]["dir"]                           = node["install"]["dir"].empty? ? "/var/lib/kagent" : node["install"]["dir"] + "/kagent"
@@ -18,7 +20,7 @@ default["kagent"]["certs_dir"]                     = "#{node["kagent"]["dir"]}/h
 
 # API calls
 default["kagent"]["dashboard"]["api"]["register"]  = "api/agentresource?action=register"
-default["kagent"]["dashboard"]["api"]["login"]     = "api/auth/login"
+default["kagent"]["dashboard"]["api"]["login"]     = "api/auth/service"
 default["kagent"]["dashboard"]["api"]["ca_host"]   = "v2/certificate/host"
 default["kagent"]["dashboard"]["api"]["heartbeat"] = "api/agentresource?action=heartbeat"
 default["kagent"]["dashboard"]["api"]["alert"]     = "api/agentresource/alert"
@@ -96,3 +98,10 @@ default["java"]["jdk_version"]                     = 8
 default["kagent"]["conda_gc_interval"]             = "1h"
 
 default["kagent"]["python_conda_versions"]         = "2.7, 3.6"
+
+default["kagent"]["certs"]["root_ca"]                   = "#{node["kagent"]["certs_dir"]}/hops_ca.pem"
+default["kagent"]["certs"]["elastic_host_certificate"]  = "#{node["kagent"]["certs_dir"]}/elastic_host.pem"
+default["kagent"]["certs"]["host_key"]                  = "#{node["kagent"]["certs_dir"]}/priv.key"
+default["kagent"]["certs"]["elastic_admin_key"]         = "#{node["kagent"]["certs_dir"]}/elastic_admin.key"
+default["kagent"]["certs"]["elastic_admin_certificate"] = "#{node["kagent"]["certs_dir"]}/elastic_admin.pem"
+default["kagent"]["certs"]["elastic_admin_cn"]          = node['install']['localhost'].casecmp?("true") ? "ELkAdmin-localhost" : "ELkAdmin-#{node['fqdn']}"
