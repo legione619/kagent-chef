@@ -350,7 +350,7 @@ class CondaCommandsHandler:
             arg = ""
             if 'arg' in command:
                 arg = command['arg']
-            if op == "REMOVE" or op == "CLONE" or op == "CREATE" or op == "YML" or op == "CLEAN":
+            if op == "REMOVE" or op == "CLONE" or op == "CREATE" or op == "YML" or op == "EXPORT" or op == "CLEAN":
                 self._envOp(command, arg, offline)
             elif op == "INSTALL" or op == "UNINSTALL" or op == "UPGRADE":  # Conda package  commands (install, uninstall, upgrade)
                 self._libOp(command)
@@ -371,26 +371,32 @@ class CondaCommandsHandler:
         
     def _envOp(self, command, arg, offline):
         global conda_ongoing
-        user = command['user']
         command_id = command['id']
         op = command['op'].upper()
         proj = command['proj']
         install_jupyter = str(command['installJupyter']).lower()
 
         tempfile_fd = None
-        script = kconfig.bin_dir + "/anaconda_env.sh"
-        logger.info("sudo {0} {1} {2} {3} {4} '{5}' {6} {7}".format(script, user, op, proj, arg, offline, kconfig.hadoop_home, install_jupyter))
+        script = kconfig.sbin_dir + "/anaconda_env.sh"
+        logger.info("sudo -u {0} {1} {2} {3} {4} '{5}' {6} {7}".format(kconfig.conda_user, script, op, proj, arg, offline, kconfig.hadoop_home, install_jupyter))
         msg=""
         try:
             self._log_conda_command(proj, op, proj, arg, -1, 'WORKING')
             yml_file_path = "''"
-            if command['op'] == 'YML':
+            if command['op'] == 'YML' or command['op'] == 'EXPORT':
                 tempfile_fd = tempfile.NamedTemporaryFile(suffix='.yml', delete=True)
                 yml_file_path = tempfile_fd.name
-                tempfile_fd.write(command['environmentYml'])
-                tempfile_fd.flush()
-                os.chmod(tempfile_fd.name, 0604)
-            msg = subprocess.check_output(['sudo', script, user, op, proj, arg, offline, kconfig.hadoop_home, install_jupyter, yml_file_path], cwd=kconfig.conda_dir, stderr=subprocess.STDOUT)
+                if command['op'] == 'YML':
+                    tempfile_fd.write(command['environmentYml'])
+                    tempfile_fd.flush()
+                    os.chmod(yml_file_path, 0604)
+                else:
+                    os.chmod(yml_file_path, 0606)
+            msg = subprocess.check_output(['sudo', '-u', kconfig.conda_user, script, op, proj, arg, offline, kconfig.hadoop_home, install_jupyter, yml_file_path], cwd=kconfig.conda_dir, stderr=subprocess.STDOUT)
+            if command['op'] == 'EXPORT':
+                with open(yml_file_path, 'r') as yml_file:
+                    content = yml_file.read()
+                    command['environmentYml'] = content
             command['status'] = 'SUCCESS'
             command['arg'] = arg
             self._log_conda_command(proj, op, proj, arg, 0, 'SUCCESS')
@@ -400,7 +406,7 @@ class CondaCommandsHandler:
             self._log_conda_command(proj, op, proj, arg, e.returncode, e.output)
             command['status'] = 'FAILED'
         finally:
-            if command['op'] == 'YML' and tempfile_fd != None:
+            if (command['op'] == 'YML' or command['op'] == 'EXPORT') and tempfile_fd != None:
                 tempfile_fd.close()
             if command_id != -1:
                 self._conda_commands_status_mutex.acquire()
@@ -412,7 +418,6 @@ class CondaCommandsHandler:
 
     def _libOp(self, command):
         global conda_ongoing
-        user = command['user']
         command_id = command['id']
         op = command['op'].upper()
         proj = command['proj']
@@ -424,13 +429,13 @@ class CondaCommandsHandler:
             channelUrl="default"
         if not version:
             version=""
-        script = kconfig.bin_dir + "/conda.sh"
+        script = kconfig.sbin_dir + "/conda.sh"
 
         try:
-            command_str = "sudo {0} {1} {2} {3} {4} {5} {6} {7}".format(script, user, op, proj, channelUrl, installType, lib, version)
+            command_str = "sudo -u {0} {1} {2} {3} {4} {5} {6} {7}".format(kconfig.conda_user, script, op, proj, channelUrl, installType, lib, version)
             logger.info("Executing libOp command {0}".format(command_str))
             self._log_conda_command(proj, op, lib, version, -1, 'WORKING')
-            msg = subprocess.check_output(['sudo', script, user, op, proj, channelUrl, installType, lib, version], cwd=kconfig.conda_dir, stderr=subprocess.STDOUT)
+            msg = subprocess.check_output(['sudo', '-u', kconfig.conda_user, script, op, proj, channelUrl, installType, lib, version], cwd=kconfig.conda_dir, stderr=subprocess.STDOUT)
             logger.info("Lib op finished without error.")
             logger.info("{0}".format(msg))
             command['status'] = 'SUCCESS'
@@ -471,13 +476,12 @@ class SystemCommandsHandler:
 
     def _conda_env_garbage_collection(self, command):
         to_be_removed = json.loads(command['arguments'])
-        exec_user = command['execUser']
 
         conda_bin = os.path.join(kconfig.conda_dir, 'bin', 'conda')
         for env in to_be_removed:
             try:
-                script = os.path.join(kconfig.bin_dir, 'anaconda_env.sh')
-                subprocess.check_call(['sudo', script, exec_user, 'REMOVE', env, '', '', '', ''], cwd=kconfig.conda_dir)
+                script = os.path.join(kconfig.sbin_dir, 'anaconda_env.sh')
+                subprocess.check_call(['sudo', '-u', kconfig.conda_user, script, 'REMOVE', env, '', '', '', ''], cwd=kconfig.conda_dir)
                 logger.info("Removed Anaconda environment {0}".format(env))
                 self._conda_envs_monitor_list.remove(env)
             except CalledProcessError as e:
@@ -492,8 +496,8 @@ class SystemCommandsHandler:
     def _service_key_rotation(self, command):
         try:
             logger.debug("Calling certificate rotation script")
-            csr_helper_script = os.path.join(kconfig.certs_dir, "run_csr.sh")
-            subprocess.check_call(["sudo", csr_helper_script, self._config_file_path, "rotate"])
+            csr_helper_script = os.path.join(kconfig.sbin_dir, "run_csr.sh")
+            subprocess.check_call(["sudo", "-u", kconfig.certs_user, csr_helper_script, self._config_file_path, "rotate"])
             
             command['status'] = 'FINISHED'
             logger.info("Successfully rotated service certificates")
