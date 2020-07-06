@@ -5,7 +5,7 @@ name             "kagent"
 license          "GPL 2.0"
 description      "Installs/Configures the Karamel agent used by Hops"
 long_description IO.read(File.join(File.dirname(__FILE__), 'README.md'))
-version          "1.2.0"
+version          "1.3.0"
 source_url       "https://github.com/karamelchef/kagent-chef"
 
 
@@ -13,13 +13,12 @@ source_url       "https://github.com/karamelchef/kagent-chef"
   supports os
 end
 
-depends 'openssl'
-depends 'sudo'
-depends 'hostsfile'
-depends 'ntp'
+depends 'openssl', '~> 4.4.0'
+depends 'hostsfile', '~> 2.4.5'
+depends 'ntp', '~> 2.0.0'
+depends 'sudo', '~> 4.0.0'
+depends 'magic_shell', '~> 1.0.0'
 depends 'conda'
-depends 'magic_shell'
-
 
 recipe "kagent::install", "Installs the Karamel agent and python dependencies"
 recipe "kagent::default", "Installs and configures the Karamel agent, including anaconda"
