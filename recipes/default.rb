@@ -41,21 +41,6 @@ if node["vagrant"] === "true" || node["vagrant"] == true
     end
 end
 
-jupyter_python = "true"
-if node.attribute?("jupyter") 
-  if node["jupyter"].attribute?("python") 
-    jupyter_python = "#{node['jupyter']['python']}".downcase
-  end
-end
-
-template "#{node["kagent"]["home"]}/bin/anaconda_sync.sh" do
-  source "anaconda_sync.sh.erb"
-  owner node["kagent"]["user"]
-  group node["kagent"]["group"]
-  mode "750"
-  action :create
-end
-
 ruby_block "whereis_systemctl" do
   block do
     Chef::Resource::RubyBlock.send(:include, Chef::Mixin::ShellOut)
@@ -72,31 +57,20 @@ sudo "kagent_systemctl" do
   only_if     { node["install"]["sudoers"]["rules"].casecmp("true") == 0 }
 end
 
-kagent_sudoers "anaconda_env" do 
-  script_name "anaconda_env.sh"
-  template    "anaconda_env.sh.erb"
-  user        node["kagent"]["user"]
-  group       node["conda"]["group"]
-  run_as      node["conda"]["user"]
-  variables({
-        :jupyter_python => jupyter_python
-  })
-end
-
-kagent_sudoers "conda" do
-    script_name "conda.sh"
-    template    "conda.sh.erb"
-    user        node["kagent"]["user"]
-    group       node["conda"]["group"]
-    run_as      node["conda"]["user"]
-end
-
 kagent_sudoers "run_csr" do
     script_name "run_csr.sh"
     template    "run_csr.sh.erb"
     user        node["kagent"]["user"]
     group       node["kagent"]["certs_group"]
     run_as      node["kagent"]["certs_user"]
+end
+
+kagent_sudoers "dockerImageDelete" do
+  user          node['kagent']['user']
+  group         "root"
+  script_name   "dockerImageDelete.sh"
+  template      "dockerImageDelete.sh.erb"
+  run_as        "ALL" # run this as root - inside we change to different users
 end
 
 service_name = "kagent"
@@ -136,88 +110,6 @@ if !node['install']['cloud'].empty?
     group node['kagent']['group']
     mode 0744
   end
-end
-
-
-case node[:platform]
-when "ubuntu"
- if node[:platform_version].to_f <= 14.04
-   node.default["systemd"] = "false"
- end
-end
-
-deps = ""
-if exists_local("hopsworks","default")
-  deps = "glassfish-domain1.service"
-end
-
-if node[:systemd] == "true"
-  service "#{service_name}" do
-    provider Chef::Provider::Service::Systemd
-    supports :restart => true, :start => true, :stop => true, :enable => true
-    action :nothing
-  end
-
-
-  case node[:platform_family]
-  when "rhel"
-    systemd_script = "/usr/lib/systemd/system/#{service_name}.service"    
-  else # debian
-    systemd_script = "/lib/systemd/system/#{service_name}.service"
-  end
-
-  template systemd_script do
-    source "#{service_name}.service.erb"
-    owner "root"
-    group "root"
-    mode 0755
-    variables({
-              :deps => deps
-              })
-    if node["services"]["enabled"] == "true"
-     notifies :enable, resources(:service => service_name)
-    end
-    notifies :restart, "service[#{service_name}]", :delayed
-  end
-
-# Creating a symlink causes systemctl enable to fail with too many symlinks
-# https://github.com/systemd/systemd/issues/3010
-
-  kagent_config service_name do
-    action :systemd_reload
-  end
-  
-  if node['kagent']['enabled'].casecmp? "true"
-    kagent_config service_name do
-      service "kagent"
-      config_file "#{node["kagent"]["etc"]}/config.ini"
-      log_file "#{node["kagent"]["dir"]}/logs/agent.log"
-      restart_agent false
-    end
-  end  
-else # sysv
-
-  service "#{service_name}" do
-    provider Chef::Provider::Service::Init::Debian
-    supports :restart => true, :start => true, :stop => true, :enable => true
-    action :nothing
-  end
-  
-  template "/etc/init.d/#{service_name}" do
-    source "#{service_name}.erb"
-    owner "root"
-    group "root"
-    mode 0755
-if node["services"]["enabled"] == "true"
-    notifies :enable, resources(:service => service_name)
-end
-    notifies :restart, "service[#{service_name}]", :delayed
-  end
-
-  kagent_config do
-    action :systemd_reload
-  end
-  
 end
 
 private_ip = my_private_ip()
@@ -266,19 +158,6 @@ if hops_dir == ""
  hops_dir = node['install']['dir'] + "/hadoop"
 end
 
-## blacklisted_envs is a comma separated list of Anaconda environments
-## that should not be deleted by Conda GC
-# python envs
-blacklisted_envs = node['kagent']['python_conda_versions'].split(",").map(&:strip)
-                     .map {|p| p.gsub(".", "") }.map {|p| "python" + p}.join(",")
-# hops-system anaconda env
-blacklisted_envs += ",hops-system,airflow"
-
-# environment used by Hopsworks Cloud
-unless node['install']['cloud'].strip.empty?
-  blacklisted_envs += ",cloud"
-end
-
 template "#{node["kagent"]["etc"]}/config.ini" do
   source "config.ini.erb"
   owner node["kagent"]["user"]
@@ -292,15 +171,8 @@ template "#{node["kagent"]["etc"]}/config.ini" do
               :public_ip => public_ip,
               :private_ip => private_ip,
               :hops_dir => hops_dir,
-              :agent_password => agent_password,
-              :kstore => "#{node["kagent"]["keystore_dir"]}/#{hostname}__kstore.jks",
-              :tstore => "#{node["kagent"]["keystore_dir"]}/#{hostname}__tstore.jks",
-              :blacklisted_envs => blacklisted_envs
+              :agent_password => agent_password
             })
-if node["services"]["enabled"] == "true"  
-  notifies :enable, "service[#{service_name}]"
-end
-  notifies :restart, "service[#{service_name}]", :delayed
 end
 
 # For upgrades we need to CHOWN the directory and the files underneat to certs:certs
@@ -312,16 +184,6 @@ bash "chown_#{node['kagent']['certs_dir']}" do
   only_if { ::Dir.exists?(node['kagent']['certs_dir'])}
 end
 
-bash "chown_#{node['kagent']['certs_dir']}" do
-  code <<-EOH
-    chown #{node['kagent']['certs_user']}:#{node['kagent']['certs_group']} #{node['kagent']['etc']}/state_store/crypto_material_state.pkl
-  EOH
-  action :run
-  only_if { ::File.exists?("#{node['kagent']['etc']}/state_store/crypto_material_state.pkl")}
-end
-
-
-
 template "#{node["kagent"]["certs_dir"]}/keystore.sh" do
   source "keystore.sh.erb"
   owner node["kagent"]["certs_user"]
@@ -330,51 +192,94 @@ template "#{node["kagent"]["certs_dir"]}/keystore.sh" do
   variables({:fqdn => hostname})
 end
 
-if node["kagent"]["test"] == false && (not conda_helpers.is_upgrade)
-  hopsworks_alt_url = "https://#{private_recipe_ip("hopsworks","default")}:8181" 
-  if node.attribute? "hopsworks"
-    if node["hopsworks"].attribute? "https" and node["hopsworks"]['https'].attribute? ('port')
-      hopsworks_alt_url = "https://#{private_recipe_ip("hopsworks","default")}:#{node['hopsworks']['https']['port']}"
+hopsworks_alt_url = "https://#{private_recipe_ip("hopsworks","default")}:8181" 
+if node.attribute? "hopsworks"
+  if node["hopsworks"].attribute? "https" and node["hopsworks"]['https'].attribute? ('port')
+    hopsworks_alt_url = "https://#{private_recipe_ip("hopsworks","default")}:#{node['hopsworks']['https']['port']}"
+  end
+end
+
+kagent_hopsify "Register Host" do
+  hopsworks_alt_url hopsworks_alt_url
+  action :register_host
+  not_if { node["kagent"]["enabled"] == "false" }
+end
+
+kagent_hopsify "Generate x.509" do
+  user node['kagent']['user']
+  crypto_directory x509_helper.get_crypto_dir(node['kagent']['user'])
+  hopsworks_alt_url hopsworks_alt_url
+  action :generate_x509
+  not_if { node["kagent"]["enabled"] == "false" }
+end
+
+if exists_local("hopsworks", "default")
+  hopsworks_user = "glassfish"
+  if node.attribute?("hopsworks")
+    if node['hopsworks'].attribute?("user")
+      hopsworks_user = node['hopsworks']['user']
     end
   end
-  kagent_keys "sign-certs" do
+  # Generate glassfish user certificates here
+  # Cannot do it in hopsworks::default as hopsify is not setup yet
+  kagent_hopsify "Generate x.509" do
+    user hopsworks_user
+    crypto_directory x509_helper.get_crypto_dir(hopsworks_user)
     hopsworks_alt_url hopsworks_alt_url
-    action :csr
+    common_name "glassfish.service.#{consul_domain}"
+    action :generate_x509
+    not_if { node["kagent"]["enabled"] == "false" }
   end
 end
 
 kagent_keys "combine_certs" do 
-  action :combine_certs
-end 
-
-bash "convert private key to PKCS#1 format on update" do
-  user "root"
-  group node['kagent']['certs_group']
-  code <<-EOH                                                                                                       
-       openssl rsa -in #{node['kagent']['certs_dir']}/priv.key -out #{node['kagent']['certs_dir']}/priv.key.rsa
-       chmod 640 #{node['kagent']['certs_dir']}/priv.key.rsa
-       chown #{node['kagent']['certs_user']}:#{node['kagent']['certs_group']} #{node['kagent']['certs_dir']}/priv.key.rsa
-  EOH
-  only_if { conda_helpers.is_upgrade and File.exists?("#{node['kagent']['certs_dir']}/priv.key")}
+  action :append2ChefTrustAnchors
 end
 
+service "#{service_name}" do
+  provider Chef::Provider::Service::Systemd
+  supports :restart => true, :start => true, :stop => true, :enable => true
+  action :nothing
+end
 
-if node["install"]["addhost"] == 'true'
+case node[:platform_family]
+when "rhel"
+  systemd_script = "/usr/lib/systemd/system/#{service_name}.service"    
+else # debian
+  systemd_script = "/lib/systemd/system/#{service_name}.service"
+end
 
-  #
-  # This code will wipe out the existing anaconda installation and replace it with one from the hopsworks server - using rsync.
-  # You should remove the anaconda base_dir (/srv/hops/anaconda/anaconda) and set the attribute install/addhost='true' for this to run.
-  #
- bash "sync-anaconda-with-existing-cluster" do
-   user "root"
-   code <<-EOH
-     #{node['kagent']['base_dir']}/bin/anaconda_sync.sh
-   EOH
-   not_if { File.directory?("#{node['conda']['base_dir']}") }
- end
+deps = ""
+if exists_local("hopsworks","default")
+  deps = "glassfish-domain1.service"
+end
+
+template systemd_script do
+  source "#{service_name}.service.erb"
+  owner "root"
+  group "root"
+  mode 0755
+  variables({
+            :deps => deps
+            })
+  if node["services"]["enabled"] == "true"
+    notifies :enable, resources(:service => service_name)
+  end
+  notifies :restart, "service[#{service_name}]", :delayed
+end
+
+kagent_config service_name do
+  action :systemd_reload
+end
   
-end  
-
+kagent_config service_name do
+  service "kagent"
+  
+  config_file "#{node["kagent"]["etc"]}/config.ini"
+  log_file "#{node["kagent"]["dir"]}/logs/agent.log"
+  restart_agent false
+  only_if { node['kagent']['enabled'].casecmp? "true" }
+end
 
 homedir = node['kagent']['user'].eql?("root") ? "/root" : "/home/#{node['kagent']['user']}"
 kagent_keys "#{homedir}" do

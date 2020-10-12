@@ -27,7 +27,7 @@ module Kagent
         not_if "getent group #{node["kagent"]["certs_group"]}"
       end
     end
-
+    
     def my_private_ip()
       if node.attribute?("private_ips") == false || node["private_ips"].empty?
          Chef::Log.error "Could not find a private_ip for this host"
@@ -266,8 +266,14 @@ module Kagent
       header['Authorization'] = "Basic #{credentials_b64}"
       header
     end
+
+    def service_discovery_enabled()
+       exists_local('consul', 'master') or exists_local('consul', 'slave')
+    end
+    
   end
 end
 
 Chef::Recipe.send(:include, Kagent::Helpers)
 Chef::Resource.send(:include, Kagent::Helpers)
+Chef::Provider.send(:include, Kagent::Helpers)

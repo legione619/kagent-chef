@@ -5,7 +5,7 @@ name             "kagent"
 license          "GPL 2.0"
 description      "Installs/Configures the Karamel agent used by Hops"
 long_description IO.read(File.join(File.dirname(__FILE__), 'README.md'))
-version          "1.3.0"
+version          "1.4.0"
 source_url       "https://github.com/karamelchef/kagent-chef"
 
 
@@ -21,7 +21,7 @@ depends 'magic_shell', '~> 1.0.0'
 depends 'conda'
 
 recipe "kagent::install", "Installs the Karamel agent and python dependencies"
-recipe "kagent::default", "Installs and configures the Karamel agent, including anaconda"
+recipe "kagent::default", "Installs and configures the Karamel agent"
 recipe "kagent::purge", "Deletes the Karamel agent files"
 recipe "kagent::dev", "Development helper library"
 
@@ -33,12 +33,20 @@ attribute "kagent/group",
           :description => "group to run kagent as",
           :type => 'string'
 
+attribute "kagent/user-home",
+          :description => "Home directory of kagent user",
+          :type => 'string'
+
 attribute "kagent/certs_user",
-          :description => "User managing the host certificates",
+          :description => "User managing PKI and service certificates",
           :type => 'string'
 
 attribute "kagent/certs_group",
-          :description => "Group having access to the host certificates",
+          :description => "Group having access to service certificates",
+          :type => 'string'
+
+attribute "kagent/userscerts_group",
+          :description => "Less privileged group than certs to access users' only certificates",
           :type => 'string'
 
 attribute "kagent/dir",
@@ -85,24 +93,12 @@ attribute "systemd",
           :description => "Use systemd startup scripts, default 'true'",
           :type => "string"
 
-attribute "kagent/conda_gc_interval",
-          :description => "Define interval for kagent to run Anaconda garbage collection, suffix: ms, s, m, h, d. Default: 1h",
-          :type => "string"
-
 attribute "ntp/install",
           :description => "Install Network Time Protocol (default: false)",
           :type => "string"
 
 attribute "services/enabled",
           :description => "Default 'false'. Set to 'true' to enable daemon services, so that they are started on a host restart.",
-          :type => "string"
-
-attribute "hops/yarn/user",
-          :description => "Yarn user for conda",
-          :type => "string"
-
-attribute "hops/group",
-          :description => "Haodop group for conda",
           :type => "string"
 
 attribute "certs/dir",
@@ -113,10 +109,10 @@ attribute "hops/dir",
           :description => "Installation directory for Hops",
           :type => 'string'
 
-attribute "jupyter/python",
-          :description => "'true' (default) to enable the python interpreter, 'false' to disable it (more secure). ",
-          :type => 'string'
+attribute "kagent/hopsify/version",
+          :description => "Version of hopsify tool",
+          :type => "string"
 
-attribute "kagent/python_conda_versions",
-          :description => "CSV of python versions to be used as base environments for Anaconda",
+attribute "kagent/hopsify/bin_url",
+          :description => "Download URL of hopsify tool",
           :type => "string"
