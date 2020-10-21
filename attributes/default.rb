@@ -91,7 +91,7 @@ default["java"]["jdk_version"]                     = 8
 
 default["kagent"]["hopsify"]["version"]            = "0.3.0"
 default["kagent"]["hopsify"]["bin_url"]            = "#{node['download_url']}/hopsify/amd64/#{node['kagent']['hopsify']['version']}/hopsify"
-default['x509']['super-crypto']['base-dir']        = "/srv/hops/super_crypto"
+default['x509']['super-crypto']['base-dir']        = node["install"]["dir"] + "/super_crypto"
 default['x509']['super-crypto']['dir']             = "#{node['x509']['super-crypto']['base-dir']}/${USER}"
 default['x509']['keystores']['keystore']           = "${USERNAME}__kstore.jks"
 default['x509']['keystores']['truststore']         = "${USERNAME}__tstore.jks"
