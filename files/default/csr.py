@@ -53,10 +53,10 @@ class Certificate:
         self.version = crypto_material_state.get_version() + 1
         # Create CSR
         csr = crypto.X509Req()
-        csr.get_subject().C = "SE"
-        csr.get_subject().ST = "Sweden"
-        csr.get_subject().L = "Stockholm"
-        csr.get_subject().O = "Hopsworks"
+        csr.get_subject().C = "IT"
+        csr.get_subject().ST = "Italia"
+        csr.get_subject().L = "Roma"
+        csr.get_subject().O = "GiottoPlatform"
         csr.get_subject().OU = str(self.version)
 
         # CN should be the hostname of the server
