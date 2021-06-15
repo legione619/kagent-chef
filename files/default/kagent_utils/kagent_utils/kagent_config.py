@@ -1,11 +1,7 @@
 import sys
 import ConfigParser
 import logging
-import random
-import string
 import socket
-
-from IPy import IP
 
 
 class KConfig:
@@ -21,6 +17,17 @@ class KConfig:
     def __init__(self, configFile):
         self._configFile = configFile
 
+    @property
+    def server_url(self):
+        if hasattr(self, "_server_url"):
+            return self._server_url
+        return None
+    
+    @server_url.setter
+    def server_url(self, server_url):
+        self._server_url = server_url
+
+
     def set_conf_value(self, section, name, value):
         """Set a new configuration property"""
         if self._config is not None:
@@ -31,12 +38,18 @@ class KConfig:
         with open(self._configFile, 'wb') as fd:
             self._config.write(fd)
 
+    def load(self):
+        self._config = ConfigParser.ConfigParser()
+        self._config.read(self._configFile)
+
     def read_conf(self):
         """Load configuration from file"""
+        if self._config is None:
+            raise Exception("Configuration file is not loaded!")
+
         try:
-            self._config = ConfigParser.ConfigParser()
-            self._config.read(self._configFile)
-            self.server_url = self._config.get('server', 'url')
+            if self.server_url is None:
+                self.server_url = self._config.get('server', 'url')
             self.register_url = self.server_url + \
                 self._config.get('server', 'path-register')
             self.ca_host_url = self.server_url + \
@@ -57,30 +70,16 @@ class KConfig:
             self.csr_log_file = self._config.get('agent', 'csr-log-file')
             self.max_log_size = self._config.getint('agent', 'max-log-size')
             self.agent_pidfile = self._config.get('agent', 'pid-file')
-            self.certificate_file = self._config.get(
-                'agent', 'certificate-file')
-            self.key_file = self._config.get('agent', 'key-file')
-            self.server_keystore = self._config.get('agent', 'server-keystore')
-            self.server_truststore = self._config.get(
-                'agent', 'server-truststore')
             self.keystore_script = self._config.get('agent', 'keystore-script')
             self.services_file = self._config.get('agent', 'services-file')
             self.watch_interval = self._config.get('agent', 'watch-interval')
             self.bin_dir = self._config.get('agent', 'bin-dir')
             self.sbin_dir = self._config.get('agent', 'sbin-dir')
-            self.group_name = self._config.get('agent', 'group-name')
             self.hadoop_home = self._config.get('agent', 'hadoop-home')
-            self.certs_dir = self._config.get('agent', 'certs-dir')
             self.certs_user = self._config.get('agent', 'certs-user')
             self.state_store_location = self._config.get(
                 'agent', 'state-store')
             self.agent_password = self._config.get('agent', 'password')
-            self.conda_dir = self._config.get('agent', 'conda-dir')
-            self.conda_user = self._config.get('agent', 'conda-user')
-            self.conda_envs_blacklist = self._config.get(
-                'agent', 'conda-envs-blacklist')
-            self.conda_gc_interval = self._config.get(
-                'agent', 'conda-gc-interval')
             self.public_ip = self._config.get('agent', 'public-ip')
             self.private_ip = self._config.get('agent', 'private-ip')
 
@@ -100,11 +99,7 @@ class KConfig:
             else:
                 self.host_id = self.hostname
 
-            self.elk_key_file = self._config.get('agent', 'elk-key-file')
-            self.elk_certificate_file = self._config.get('agent', 'elk-certificate-file')
-            self.elk_cn = self._config.get('agent', 'elk-cn')
-            self.elastic_host_certificate = self._config.get('agent', 'elastic-host-certificate')
-            self.hops_ca_cert_file = self._config.get('agent', 'hops_ca-cert-file')
+            self.crypto_dir = self._config.get('agent', 'crypto-dir')
         except Exception, e:
             print("Exception while reading {0}: {1}".format(
                 self._configFile, e))

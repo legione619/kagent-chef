@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+set -e
+
+help() {
+    echo ""
+    echo "usage: $0 [image]"
+    echo ""
+    exit 1
+}
+
+VALID_IMAGE_NAME='<%= node['conda']['docker']['image-validation-regex'] %>'
+# Sanity checks for injection attacks
+if ! [[ $2 =~ $VALID_IMAGE_NAME ]] ; then
+echo "error: Not an image name $3" >&2
+	help
+    fi
+
+    if [[ "$(docker images -q $2 2> /dev/null)" == "" ]]; then
+	exit 0
+    else
+	docker rmi -f $2
+   fi
+
+exit $?

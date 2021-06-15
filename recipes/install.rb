@@ -16,12 +16,12 @@ if node['install']['enterprise']['install'].casecmp? "true"
   end
   if node['install']['enterprise']['password'] and not node['install']['enterprise']['username']
     raise "Installing Hopsworks EE, password is set but not username"
-  end    
+  end
 end
 
 case node["platform_family"]
 when "debian"
-  package ["python2.7", "python2.7-dev", "build-essential", "libssl-dev", "jq"]
+  package ["python3", "python3-dev", "build-essential", "libssl-dev", "jq","acl"]
 
 # Change lograte policy
   cookbook_file '/etc/logrotate.d/rsyslog' do
@@ -31,14 +31,39 @@ when "debian"
     mode '0644'
   end
 
+  # Ubuntu comes with unattended-upgrades package pre-install which
+  # automatically upgrades installed packages
+  # Disable it as it can/will upgrade a package to a version we don't
+  # support.
+  # Also, as a side-effect when run it stops the docker daemon
+  systemd_unit "apt-daily-upgrade.timer" do
+    action [:stop, :disable]
+  end
+  package 'unattended-upgrades' do
+    action :remove
+  end
+
 when "rhel"
 
   if node['rhel']['epel'].downcase == "true"
     package "epel-release"
   end
 
-# gcc, gcc-c++, kernel-devel are the equivalent of "build-essential" from apt.
-  package ["gcc", "gcc-c++", "kernel-devel", "openssl", "openssl-devel", "openssl-libs", "python", "python-pip", "python-devel", "jq"]
+  # gcc, gcc-c++, kernel-devel are the equivalent of "build-essential" from apt.
+  # see the comment in tensorflow::install for the explanation on what's going on here.
+  package 'kernel-devel' do
+    version node['kernel']['release'].sub(/\.#{node['kernel']['machine']}/, "")
+    arch node['kernel']['machine']
+    action :install
+    ignore_failure true
+  end
+
+  package 'kernel-devel' do
+    action :install
+    not_if  "ls -l /usr/src/kernels/$(uname -r)"
+  end
+
+  package ["gcc", "gcc-c++", "openssl", "openssl-devel", "openssl-libs", "python3", "python3-pip", "python3-devel", "jq"]
 
   # Change lograte policy
   cookbook_file '/etc/logrotate.d/syslog' do
@@ -64,7 +89,7 @@ end
 user node["kagent"]["certs_user"] do
   gid node["kagent"]["certs_group"]
   action :create
-  manage_home false 
+  manage_home false
   system true
   shell "/bin/nologin"
   not_if "getent passwd #{node["kagent"]["certs_user"]}"
@@ -75,7 +100,7 @@ user node["kagent"]["user"] do
   gid node["kagent"]["group"]
   action :create
   manage_home true
-  home "/home/#{node['kagent']['user']}"
+  home node['kagent']['user-home']
   shell "/bin/bash"
   system true
   not_if "getent passwd #{node["kagent"]["user"]}"
@@ -84,7 +109,7 @@ end
 
 group node["kagent"]["group"] do
   action :modify
-  # Certs user is in the kagnet group so it can also modify the Kagent state store. 
+  # Certs user is in the kagnet group so it can also modify the Kagent state store.
   members [node["kagent"]["user"], node["kagent"]["certs_user"]]
   append true
   not_if { node['install']['external_users'].casecmp("true") == 0 }
@@ -114,7 +139,7 @@ end
 
 chef_gem "inifile" do
   action :install
-end  
+end
 
 directory node["kagent"]["dir"]  do
   owner node["kagent"]["user"]
@@ -168,13 +193,6 @@ directory "#{node["kagent"]["home"]}/bin" do
   action :create
 end
 
-directory node["kagent"]["keystore_dir"] do
-  owner node["kagent"]["certs_user"]
-  group node["kagent"]["certs_group"]
-  mode "750"
-  action :create
-end
-
 file node["kagent"]["services"] do
   owner node["kagent"]["user"]
   group node["kagent"]["group"]
@@ -203,9 +221,40 @@ cookbook_file "#{node["kagent"]["home"]}/agent.py" do
   mode 0710
 end
 
-cookbook_file "#{node["kagent"]["certs_dir"]}/csr.py" do
-  source 'csr.py'
+directory "#{node['x509']['super-crypto']['base-dir']}" do
   owner node["kagent"]["certs_user"]
   group node["kagent"]["certs_group"]
-  mode 0710
+  mode 0755
+  action :create
 end
+
+basename = File.basename(node['kagent']['hopsify']['bin_url'])
+remote_file "#{node["kagent"]["certs_dir"]}/#{basename}" do
+    user node['kagent']['certs_user']
+    group node['kagent']['certs_group']
+    source node['kagent']['hopsify']['bin_url']
+    mode 0550
+    action :create
+end
+
+template "#{node["kagent"]["home"]}/bin/start-all-local-services.sh" do
+  source "start-all-local-services.sh.erb"
+  owner node["kagent"]["user"]
+  group node["kagent"]["group"]
+  mode 0740
+end
+
+template "#{node["kagent"]["home"]}/bin/shutdown-all-local-services.sh" do
+  source "shutdown-all-local-services.sh.erb"
+  owner node["kagent"]["user"]
+  group node["kagent"]["group"]
+  mode 0740
+end
+
+template "#{node["kagent"]["home"]}/bin/status-all-local-services.sh" do
+  source "status-all-local-services.sh.erb"
+  owner node["kagent"]["user"]
+  group node["kagent"]["group"]
+  mode 0740
+end
+
