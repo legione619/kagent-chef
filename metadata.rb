@@ -5,7 +5,7 @@ name             "kagent"
 license          "GPL 2.0"
 description      "Installs/Configures the Karamel agent used by Hops"
 long_description IO.read(File.join(File.dirname(__FILE__), 'README.md'))
-version          "2.2.0"
+version          "2.3.0"
 source_url       "https://github.com/karamelchef/kagent-chef"
 
 
@@ -24,10 +24,6 @@ recipe "kagent::install", "Installs the Karamel agent and python dependencies"
 recipe "kagent::default", "Installs and configures the Karamel agent"
 recipe "kagent::purge", "Deletes the Karamel agent files"
 recipe "kagent::dev", "Development helper library"
-
-attribute "kagent/port",
-          :description => "Rest Port to run kagent as",
-          :type => 'string'
 
 attribute "kagent/user",
           :description => "Username to run kagent as",
@@ -119,4 +115,12 @@ attribute "kagent/hopsify/version",
 
 attribute "kagent/hopsify/bin_url",
           :description => "Download URL of hopsify tool",
+          :type => "string"
+
+attribute "kagent/cloud/monitor_interval",
+          :description => "interval in seconds to check for cloud events",
+          :type => "string"
+
+attribute "kagent/cloud/monitor_url",
+          :description => "URL from which to pull cloud events",
           :type => "string"
