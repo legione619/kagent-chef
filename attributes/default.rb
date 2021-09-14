@@ -44,7 +44,7 @@ default["kagent"]["dashboard_app"]                 = "hopsworks-api"
 default["kagent"]["ca_app"]                        = "hopsworks-ca"
 
 # local settings for agent
-default["kagent"]["port"]                          = 9090
+default["kagent"]["port"]                          = 8090
 default["kagent"]["heartbeat_interval"]            = 3
 default["kagent"]["watch_interval"]                = "2s"
 default["kagent"]["pid_file"]                      = node["kagent"]["dir"] + "/kagent.pid"
