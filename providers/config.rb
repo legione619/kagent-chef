@@ -36,6 +36,7 @@ action :add do
         systemctl restart kagent
       EOH
       not_if {new_resource.restart_agent == false}
+      ignore_failure node['kagent']['enabled'].casecmp?("false")
     end
   rescue Exception => ex
     if node['kagent']['enabled'].casecmp?("true")
@@ -55,8 +56,8 @@ action :systemd_reload do
     user "root"
     ignore_failure true
     code <<-EOH
-     systemctl stop #{new_resource.name}
      systemctl daemon-reload
+     systemctl stop #{new_resource.name}
      systemctl reset-failed
      systemctl start #{new_resource.name}
     EOH

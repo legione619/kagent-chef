@@ -3,19 +3,35 @@ include_attribute "conda"
 # Default values for configuration parameters
 default["kagent"]["version"]                       = node["install"]["version"]
 default["kagent"]["user"]                          = node["install"]["user"].empty? ? "kagent" : node["install"]["user"]
+default["kagent"]["user_id"]                       = '1514'
 default["kagent"]["group"]                         = node["install"]["user"].empty? ? "kagent" : node["install"]["user"]
 default["kagent"]["user-home"]                     = "/home/#{node["kagent"]["user"]}"
-
+default["kagent"]["group_id"]                      = '1510'
 default["kagent"]["certs_group"]                   = "certs"
+default["kagent"]["certs_group_id"]                = '1511'
 default["kagent"]["certs_user"]                    = "certs"
+default["kagent"]["certs_user_id"]                 = '1515'
 
 # Less privileged group for accessing users certificates in transient/
 default["kagent"]["userscerts_group"]              = "userscerts"
+default["kagent"]["userscerts_group_id"]           = '1512'
 
 default["kagent"]["dir"]                           = node["install"]["dir"].empty? ? "/var/lib/kagent" : node["install"]["dir"] + "/kagent"
 default["kagent"]["base_dir"]                      = "#{node["kagent"]["dir"]}/kagent"
 default["kagent"]["home"]                          = "#{node["kagent"]["dir"]}/kagent-#{node["kagent"]["version"]}"
 default["kagent"]["etc"]                           = "#{node["kagent"]["dir"]}/etc"
+default['kagent']['state_store']                   = "#{node['kagent']['etc']}/state_store"
+default['kagent']['logs']                          = "#{node['kagent']['dir']}/logs"
+default['csr']['log-file']                         = "#{node["kagent"]["certs_dir"]}/csr.log"
+
+# Data volume directories
+default['kagent']['data_volume']['root_dir']       = "#{node['data']['dir']}/kagent"
+default['kagent']['data_volume']['state_store']    = "#{node['kagent']['data_volume']['root_dir']}/state_store"
+default['kagent']['data_volume']['logs']           = "#{node['kagent']['data_volume']['root_dir']}/logs"
+default['csr']['data_volume']['logs']              = "#{node['data']['dir']}/csr_logs"
+default['csr']['data_volume']['log-file']          = "#{node['csr']['data_volume']['logs']}/csr.log"
+default['certs']['data_volume']['dir']             = "#{node['data']['dir']}/certs-dir"
+default['x509']['data_volume']['super-crypto-dir'] = "#{node['data']['dir']}/super_crypto"
 
 default["kagent"]["enabled"]                       = "true"
 
@@ -44,7 +60,7 @@ default["kagent"]["dashboard_app"]                 = "hopsworks-api"
 default["kagent"]["ca_app"]                        = "hopsworks-ca"
 
 # local settings for agent
-default["kagent"]["port"]                          = 9090
+default["kagent"]["port"]                          = 8090
 default["kagent"]["heartbeat_interval"]            = 3
 default["kagent"]["watch_interval"]                = "2s"
 default["kagent"]["pid_file"]                      = node["kagent"]["dir"] + "/kagent.pid"

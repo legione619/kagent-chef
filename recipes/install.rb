@@ -21,7 +21,7 @@ end
 
 case node["platform_family"]
 when "debian"
-  package ["python3", "python3-dev", "build-essential", "libssl-dev", "jq","acl"]
+  package ["python3", "python3-dev", "build-essential", "libssl-dev", "jq"]
 
 # Change lograte policy
   cookbook_file '/etc/logrotate.d/rsyslog' do
@@ -75,18 +75,21 @@ when "rhel"
 end
 
 group node["kagent"]["group"] do
+  gid node['kagent']['group_id']
   action :create
   not_if "getent group #{node["kagent"]["group"]}"
   not_if { node['install']['external_users'].casecmp("true") == 0 }
 end
 
 group node["kagent"]["certs_group"] do
+  gid node['kagent']['certs_group_id']
   action :create
   not_if "getent group #{node["kagent"]["certs_group"]}"
   not_if { node['install']['external_users'].casecmp("true") == 0 }
 end
 
 user node["kagent"]["certs_user"] do
+  uid node['kagent']['certs_user_id']
   gid node["kagent"]["certs_group"]
   action :create
   manage_home false
@@ -97,6 +100,7 @@ user node["kagent"]["certs_user"] do
 end
 
 user node["kagent"]["user"] do
+  uid node['kagent']['user_id']
   gid node["kagent"]["group"]
   action :create
   manage_home true
@@ -150,21 +154,119 @@ directory node["kagent"]["dir"]  do
   not_if { File.directory?("#{node["kagent"]["dir"]}") }
 end
 
-directory node["kagent"]["etc"]  do
+directory node['data']['dir'] do
+  owner 'root'
+  group 'root'
+  mode '0775'
+  action :create
+  not_if { ::File.directory?(node['data']['dir']) }
+end
+
+directory node['kagent']['data_volume']['root_dir']  do
   owner node["kagent"]["user"]
   group node["kagent"]["group"]
   mode "755"
   action :create
-  not_if { File.directory?("#{node["kagent"]["etc"]}") }
+  not_if { File.directory?("#{node['kagent']['data_volume']['root_dir']}") }
 end
 
-directory "#{node["kagent"]["etc"]}/state_store" do
-  owner node["kagent"]["user"]
-  group node["kagent"]["group"]
-  mode "770"
+directory node['kagent']['data_volume']['logs']  do
+  owner node['kagent']['user']
+  group node['kagent']['group']
+  mode "755"
   action :create
-  not_if { File.directory?("#{node["kagent"]["etc"]}/state_store") }
+  not_if { File.directory?("#{node['kagent']['data_volume']['logs']}") }
 end
+
+bash 'Move kagent logs to data volume' do
+  user 'root'
+  code <<-EOH
+    set -e
+    mv -f #{node['kagent']['logs']}/* #{node['kagent']['data_volume']['logs']}
+    mv -f #{node['kagent']['logs']} #{node['kagent']['logs']}_deprecated
+  EOH
+  only_if { conda_helpers.is_upgrade }
+  only_if { File.directory?(node['kagent']['logs'])}
+  not_if { File.symlink?(node['kagent']['logs'])}
+end
+
+link node['kagent']['logs'] do
+  owner node['kagent']['user']
+  group node['kagent']['group']
+  mode '0755'
+  to node['kagent']['data_volume']['logs']
+end
+
+directory node['csr']['data_volume']['logs']  do
+  owner node['kagent']['certs_user']
+  group node['kagent']['group']
+  mode "750"
+  action :create
+  not_if { File.directory?(node['csr']['data_volume']['logs']) }
+end
+
+bash 'Move CSR log file to data volume' do
+  user 'root'
+  code <<-EOH
+    set -e
+    mv -f #{node['csr']['log-file']} #{node['csr']['data_volume']['log-file']}
+  EOH
+  only_if { conda_helpers.is_upgrade }
+  only_if { File.exist?(node['csr']['log-file'])}
+  not_if { File.symlink?(node['csr']['log-file']) }
+end
+
+file node['csr']['data_volume']['log-file'] do
+  content ''
+  owner node['kagent']['certs_user']
+  group node['kagent']['group']
+  mode "750"
+  action :create
+  not_if { File.exist?(node['csr']['data_volume']['log-file']) }
+end
+
+link node['csr']['log-file'] do
+  owner node['kagent']['certs_user']
+  group node['kagent']['group']
+  mode "750"
+  to node['csr']['data_volume']['log-file']
+end
+
+directory node['kagent']['etc']  do
+  owner node['kagent']['user']
+  group node['kagent']['group']
+  mode "755"
+  action :create
+  not_if { File.directory?(node['kagent']['etc']) }
+end
+
+directory node['kagent']['data_volume']['state_store'] do
+  owner node['kagent']['user']
+  group node['kagent']['group']
+  mode '0770'
+  action :create
+  not_if { File.directory?(node['kagent']['data_volume']['state_store'])}
+end
+
+bash 'Move CSR state store to data volume' do
+  user 'root'
+  code <<-EOH
+    set -e
+    mv -f #{node['kagent']['state_store']}/* #{node['kagent']['data_volume']['state_store']}
+    mv -f #{node['kagent']['state_store']} #{node['kagent']['state_store']}_deprecated
+  EOH
+  only_if { conda_helpers.is_upgrade }
+  only_if { File.directory?(node['kagent']['state_store'])}
+  not_if { File.symlink?(node['kagent']['state_store']) }
+end
+
+link node['kagent']['state_store'] do
+  owner node['kagent']['user']
+  group node['kagent']['group']
+  mode '0770'
+  to node['kagent']['data_volume']['state_store']
+end
+
 
 directory node["kagent"]["home"] do
   owner node["kagent"]["user"]
@@ -221,11 +323,29 @@ cookbook_file "#{node["kagent"]["home"]}/agent.py" do
   mode 0710
 end
 
-directory "#{node['x509']['super-crypto']['base-dir']}" do
+directory node['x509']['data_volume']['super-crypto-dir'] do
+  owner node['kagent']['certs_user']
+  group node['kagent']['certs_group']
+  mode 0755
+end
+
+bash 'Move super users certificates to data volume' do
+  user 'root'
+  code <<-EOH
+    set -e
+    mv -f #{node['x509']['super-crypto']['base-dir']}/* #{node['x509']['data_volume']['super-crypto-dir']}
+    rmdir #{node['x509']['super-crypto']['base-dir']}
+  EOH
+  only_if { conda_helpers.is_upgrade }
+  only_if { File.directory?(node['x509']['super-crypto']['base-dir'])}
+  not_if { File.symlink?(node['x509']['super-crypto']['base-dir'])}
+end
+
+link "#{node['x509']['super-crypto']['base-dir']}" do
   owner node["kagent"]["certs_user"]
   group node["kagent"]["certs_group"]
   mode 0755
-  action :create
+  to node['x509']['data_volume']['super-crypto-dir']
 end
 
 basename = File.basename(node['kagent']['hopsify']['bin_url'])
