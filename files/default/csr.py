@@ -61,7 +61,7 @@ class Certificate:
         csr.get_subject().C = "IT"
         csr.get_subject().ST = "Italia"
         csr.get_subject().L = "Roma"
-        csr.get_subject().O = "GiottoPlatform"
+        csr.get_subject().O = "DataPlatform"
         csr.get_subject().OU = str(self.version)
 
         # CN should be the hostname of the server
@@ -193,7 +193,7 @@ class ELKAdminCertificate:
         csr.get_subject().C = "IT"
         csr.get_subject().ST = "Italia"
         csr.get_subject().L = "Roma"
-        csr.get_subject().O = "GiottoPlatform"
+        csr.get_subject().O = "DataPlatform"
         csr.get_subject().OU = str(self.version)
 
         # CN should be the hostname of the server
