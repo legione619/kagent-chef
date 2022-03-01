@@ -283,12 +283,12 @@ kagent_config service_name do
   service "kagent"
   
   config_file "#{node["kagent"]["etc"]}/config.ini"
-  log_file "#{node["kagent"]["dir"]}/logs/agent.log"
+  log_file "#{node["kagent"]["logs"]}/agent.log"
   restart_agent false
   only_if { node['kagent']['enabled'].casecmp? "true" }
 end
 
-homedir = node['kagent']['user'].eql?("root") ? "/root" : "/home/#{node['kagent']['user']}"
+homedir = node['kagent']['user'].eql?("root") ? "/root" : conda_helpers.get_user_home(node['kagent']['user'])
 kagent_keys "#{homedir}" do
   cb_user "#{node['kagent']['user']}"
   cb_group "#{node['kagent']['group']}"
